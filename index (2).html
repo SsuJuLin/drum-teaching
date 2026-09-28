@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>🐸 阿森Asen｜工作&爵士鼓教學系統</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0f0a;--surface:#111a11;--card:#162016;--card2:#1c2a1c;
+  --border:#1e2e1e;--border2:#2a3e2a;
+  --gold:#4a9060;--gold2:#3a7050;
+  --accent:#5db87a;--accent2:#4a9a64;
+  --text:#ececec;--text2:#cccccc;--text3:#888888;
+  --green:#5db87a;--red:#c46a6a;
+  --safe-top:env(safe-area-inset-top,0px);--safe-bot:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html{height:100%;background:var(--bg);}
+body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microsoft JhengHei','微軟正黑體','Noto Sans TC',sans-serif;font-size:14px;overscroll-behavior:none;}
+.app{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh;max-width:600px;margin:0 auto;}
+
+/* Header */
+.top-header{position:sticky;top:0;z-index:100;background:var(--surface);border-bottom:1px solid var(--border);padding:calc(var(--safe-top)+10px) 16px 8px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(20px);min-height:calc(var(--safe-top)+53px);}
+.header-icon{display:none;}
+.header-title{font-size:19px;font-weight:400;line-height:1.2;color:#ececec;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;}
+.header-sub{font-size:10px;color:var(--text3);line-height:1.2;text-align:center;}
+.header-action{background:var(--accent);color:#0a0f0a;border:none;border-radius:16px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;}
+.fab{position:fixed;bottom:calc(80px + var(--safe-bot));right:20px;background:var(--accent);color:#0a0f0a;border:none;border-radius:24px;padding:12px 20px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;z-index:300;box-shadow:0 4px 20px rgba(93,184,122,0.35);transition:transform 0.15s;}
+.fab:active{transform:scale(0.96);}
+
+/* Content & Nav */
+.content{flex:1;overflow-y:auto;padding-bottom:calc(64px + var(--safe-bot) + 16px);}
+.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;background:var(--surface);border-top:1px solid var(--border);padding-bottom:var(--safe-bot);display:flex;z-index:200;}
+.nav-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 4px 8px;gap:3px;cursor:pointer;border:none;background:none;font-family:inherit;color:var(--text3);transition:color 0.15s;}
+.nav-tab.active{color:var(--accent);}
+.nav-icon{width:22px;height:22px;line-height:1;display:flex;align-items:center;justify-content:center;}
+.nav-label{font-size:10px;font-weight:600;}
+
+/* Pages */
+.page{display:none;animation:fadeUp 0.2s ease;}
+.page.active{display:block;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* Loading */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:12px;color:var(--text3);}
+.spinner{width:32px;height:32px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* Dashboard */
+.dash-hero{margin:16px;background:linear-gradient(135deg,#0a150a,#0f200f);border:1px solid #1a3a1a;border-radius:16px;padding:20px;display:flex;align-items:center;gap:16px;}
+.hero-drum{font-size:44px;}
+.hero-text .ht1{font-size:26px;font-weight:700;color:#ececec;}
+.hero-text .ht2{font-size:17px;color:var(--text3);margin-top:6px;}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px;margin-bottom:16px;}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center;}
+.stat-num{font-size:22px;font-weight:900;color:var(--accent);font-family:'Space Mono',monospace;}
+.stat-label{font-size:10px;color:var(--text3);margin-top:2px;}
+.section-head{padding:0 16px;margin-bottom:10px;}
+.section-title{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;}
+.classroom-list{padding:0 16px;display:flex;flex-direction:column;gap:8px;margin-bottom:20px;}
+.classroom-row{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:background 0.15s;}
+.classroom-row:active{background:var(--card2);}
+.cr-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.cr-info{flex:1;}
+.cr-name{font-size:14px;font-weight:700;}
+.cr-days{font-size:11px;color:var(--text3);margin-top:2px;font-family:'Space Mono',monospace;}
+.cr-count{font-size:20px;font-weight:900;color:var(--accent);font-family:'Space Mono',monospace;}
+.cr-arrow{color:var(--text3);font-size:16px;}
+
+/* Schedule */
+.schedule-wrap{padding:16px;}
+.day-card{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;}
+.day-card-header{padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);background:var(--card2);}
+.day-badge{font-size:12px;font-weight:700;font-family:'Space Mono',monospace;padding:2px 10px;border-radius:20px;background:var(--border2);color:var(--text2);}
+.day-badge.today{background:var(--accent);color:#0a0f0a;}
+.day-count{font-size:11px;color:var(--text3);margin-left:auto;}
+.slot-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;}
+.slot-row:last-child{border-bottom:none;}
+.slot-row:active{background:var(--card2);}
+.slot-row.inactive{opacity:0.35;filter:saturate(0.2);}
+.slot-bar{width:3px;height:36px;border-radius:2px;flex-shrink:0;}
+.slot-main{flex:1;}
+.slot-name{font-size:14px;font-weight:600;}
+.slot-detail{font-size:11px;color:var(--text3);margin-top:2px;font-family:'Space Mono',monospace;}
+.slot-stars{font-size:13px;}
+.day-empty{padding:14px;text-align:center;color:var(--text3);font-size:13px;}
+
+/* Students */
+.filter-scroll{display:flex;gap:6px;overflow-x:auto;padding:12px 16px 12px;scrollbar-width:none;}
+.filter-scroll::-webkit-scrollbar{display:none;}
+.chip{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer;border:1px solid var(--border2);background:var(--card);color:var(--text2);flex-shrink:0;transition:all 0.15s;}
+.chip.active{background:var(--accent);color:#0a0f0a;border-color:var(--accent);}
+.student-items{display:flex;flex-direction:column;gap:8px;padding:0 16px;}
+.student-row{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:background 0.15s;}
+.student-row:active{background:var(--card2);}
+.student-row.inactive{opacity:0.35;filter:saturate(0.2);}
+.s-avatar{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;flex-shrink:0;overflow:hidden;}
+.s-avatar img{width:100%;height:100%;object-fit:cover;}
+.s-info{flex:1;min-width:0;}
+.s-name{font-size:15px;font-weight:700;}
+.s-meta{font-size:11px;color:var(--text3);margin-top:2px;}
+.s-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
+.s-stars{font-size:14px;}
+
+/* Detail */
+.detail-wrap{padding:0 16px 16px;}
+.detail-hero{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;}
+.dh-top{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;}
+.dh-avatar{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;flex-shrink:0;overflow:hidden;}
+.dh-avatar img{width:100%;height:100%;object-fit:cover;}
+.dh-name{font-size:22px;font-weight:900;margin-bottom:6px;}
+.dh-tags{display:flex;flex-wrap:wrap;gap:5px;}
+.dh-tag{padding:3px 10px;border-radius:8px;font-size:11px;font-weight:600;}
+.dh-note{font-size:13px;color:var(--text2);line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);white-space:pre-wrap;}
+.stars-card{background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:14px;display:flex;align-items:center;gap:16px;}
+.sc-left{flex:1;}
+.sc-label{font-size:11px;color:var(--text3);margin-bottom:4px;}
+.sc-stars{font-size:26px;letter-spacing:2px;}
+.sc-sub{font-size:11px;color:var(--text3);margin-top:4px;}
+.sc-right{text-align:center;}
+.sc-num{font-size:28px;font-weight:900;color:var(--accent);font-family:'Space Mono',monospace;}
+.sc-numlab{font-size:10px;color:var(--text3);}
+.progress-bar{height:6px;background:var(--border);border-radius:3px;margin-top:10px;overflow:hidden;}
+.progress-fill{height:100%;background:var(--accent);border-radius:3px;transition:width 0.4s;}
+.rec-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.rec-count{font-size:12px;color:var(--text3);}
+.add-rec-btn{background:var(--accent);color:#0a0f0a;border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;}
+.rec-list{display:flex;flex-direction:column;gap:8px;}
+.rec-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.rec-card-top{padding:12px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);}
+.rec-date{font-size:12px;font-weight:700;font-family:'Space Mono',monospace;}
+.rec-time{font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;}
+.rec-stars-badge{margin-left:auto;font-size:14px;}
+.rec-more-btn{background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:0 0 0 8px;line-height:1;}
+.rec-body{padding:10px 14px;}
+.rec-field{margin-bottom:8px;}
+.rec-field:last-child{margin-bottom:0;}
+.rf-label{font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;}
+.rf-val{font-size:13px;color:var(--text2);line-height:1.7;white-space:pre-wrap;}
+.rec-empty{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:32px;text-align:center;color:var(--text3);}
+
+/* Classroom */
+.classroom-detail{padding:0 16px 16px;}
+.cd-hero{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px;display:flex;align-items:center;gap:14px;}
+.cd-icon{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;}
+.cd-name{font-size:20px;font-weight:900;}
+.cd-days{font-size:11px;color:var(--text3);margin-top:3px;font-family:'Space Mono',monospace;}
+.cd-cnt{margin-left:auto;text-align:center;}
+.cd-cnt-num{font-size:28px;font-weight:900;color:var(--accent);font-family:'Space Mono',monospace;}
+.cd-cnt-lab{font-size:10px;color:var(--text3);}
+.day-group{margin-bottom:16px;}
+.day-group-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+.back-bar{display:flex;align-items:center;gap:6px;padding:12px 16px 4px;color:var(--text3);font-size:13px;cursor:pointer;border:none;background:none;font-family:inherit;}
+
+/* More menu */
+.more-btn{background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;padding:4px 8px;line-height:1;letter-spacing:1px;}
+.more-btn:hover{color:var(--text);}
+.popup-menu{position:fixed;background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:6px;z-index:800;min-width:160px;box-shadow:0 8px 32px rgba(0,0,0,0.5);}
+.popup-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;transition:background 0.15s;}
+.popup-item:hover{background:var(--card2);}
+.popup-item.danger{color:var(--red);}
+.popup-overlay{position:fixed;inset:0;z-index:799;}
+
+/* Overlay / Sheet */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:500;display:flex;flex-direction:column;justify-content:flex-end;opacity:0;pointer-events:none;transition:opacity 0.25s;}
+.overlay.show{opacity:1;pointer-events:all;}
+.sheet{background:var(--surface);border-top:1px solid var(--border2);border-radius:20px 20px 0 0;padding-bottom:calc(var(--safe-bot)+16px);max-height:92vh;overflow-y:auto;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.32,0.72,0,1);}
+.overlay.show .sheet{transform:translateY(0);}
+.sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border2);margin:12px auto 0;}
+.sheet-title{font-size:17px;font-weight:800;padding:14px 20px 0;}
+.sheet-body{padding:16px 20px 0;}
+.form-group{margin-bottom:14px;}
+.form-label{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:6px;}
+.form-input,.form-select,.form-textarea{width:100%;background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:11px 14px;font-family:inherit;font-size:15px;color:var(--text);outline:none;transition:border-color 0.2s;}
+.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--accent);}
+.form-select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%235a5248' d='M5 7L1 3h8z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:32px;}
+.form-textarea{min-height:80px;resize:none;}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.star-picker{display:flex;gap:8px;}
+.star-opt{flex:1;background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:12px 4px;cursor:pointer;font-size:18px;text-align:center;transition:all 0.15s;border:none;font-family:inherit;color:var(--text);}
+.star-opt.active{background:rgba(93,184,122,0.15);border:1px solid var(--accent);}
+.sheet-footer{padding:14px 20px 0;display:flex;gap:8px;}
+.btn-cancel{flex:1;background:var(--card2);color:var(--text2);border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
+.btn-save{flex:2;background:var(--accent);color:#0a0f0a;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
+.btn-danger{flex:1;background:rgba(196,106,106,0.15);color:var(--red);border:1px solid rgba(196,106,106,0.3);border-radius:12px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
+
+/* Confirm dialog */
+.confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:900;display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;pointer-events:none;transition:opacity 0.2s;}
+.confirm-overlay.show{opacity:1;pointer-events:all;}
+.confirm-box{background:var(--surface);border:1px solid var(--border2);border-radius:20px;padding:24px;width:100%;max-width:320px;text-align:center;}
+.confirm-title{font-size:18px;font-weight:800;margin-bottom:8px;}
+.confirm-msg{font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.6;}
+.confirm-btns{display:flex;gap:10px;}
+.confirm-cancel{flex:1;background:var(--card2);color:var(--text2);border:none;border-radius:12px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
+.confirm-delete{flex:1;background:var(--red);color:#fff;border:none;border-radius:12px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
+
+/* Tags */
+.tag-yamaha{background:rgba(212,133,74,0.15);color:#d4854a;}
+.tag-linkou{background:rgba(74,144,212,0.15);color:#4a90d4;}
+.tag-neili{background:rgba(144,74,212,0.15);color:#904ad4;}
+.tag-yiwen{background:rgba(74,212,144,0.15);color:#4ad490;}
+.tag-active{background:rgba(74,144,96,0.15);color:#6abf84;}
+.tag-pause{background:rgba(212,174,74,0.15);color:#d4ae4a;}
+.tag-stop{background:rgba(212,74,74,0.15);color:#d44a4a;}
+
+/* Toast */
+.toast{position:fixed;top:calc(var(--safe-top)+70px);left:50%;transform:translateX(-50%) translateY(-20px);background:#222;color:var(--text);border:1px solid var(--border2);border-radius:20px;padding:8px 20px;font-size:13px;z-index:9999;opacity:0;transition:all 0.3s;pointer-events:none;white-space:nowrap;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top-header">
+    <div class="header-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="8" rx="9" ry="3.5"/><path d="M3 8v8c0 1.93 4.03 3.5 9 3.5s9-1.57 9-3.5V8"/><path d="M3 12c0 1.93 4.03 3.5 9 3.5s9-1.57 9-3.5"/><line x1="7" y1="2" x2="5" y2="0"/><line x1="17" y1="2" x2="19" y2="0"/></svg></div>
+    <div style="flex:1;min-width:0;">
+      <div class="header-title" id="header-title">首頁</div>
+      <div class="header-sub" id="header-date"></div>
+    </div>
+  </div>
+  <!-- 漂浮按鈕 -->
+  <button class="fab" id="header-btn" onclick="openAddRecord()">＋ 紀錄</button>
+  <div class="content" id="main-content">
+    <div class="page active" id="page-home">
+      <div class="dash-hero">
+        <div class="hero-drum"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="9" rx="9" ry="4"/><path d="M3 9v6c0 2.21 4.03 4 9 4s9-1.79 9-4V9"/><path d="M3 12c0 2.21 4.03 4 9 4s9-1.79 9-4"/></svg></div>
+        <div class="hero-text">
+          <div class="ht1">阿森Asen｜工作&爵士鼓教學系統</div>
+          <div class="ht2" id="hero-date"></div>
+        </div>
+      </div>
+      <div class="stat-row" id="stat-row"></div>
+      <div class="section-head"><div class="section-title">📍 教室</div></div>
+      <div class="classroom-list" id="classroom-list"></div>
+    </div>
+    <div class="page" id="page-schedule">
+      <div class="schedule-wrap" id="schedule-wrap"></div>
+    </div>
+    <div class="page" id="page-students">
+      <div class="filter-scroll" id="filter-scroll"></div>
+      <div class="student-items" id="student-items"></div>
+    </div>
+    <div class="page" id="page-detail">
+      <div style="display:flex;align-items:center;padding:12px 16px 4px;">
+        <button class="back-bar" id="detail-back" style="padding:0;">‹ 返回</button>
+        <button class="more-btn" id="student-more-btn" style="margin-left:auto;font-size:22px;color:var(--text3);" onclick="">···</button>
+      </div>
+      <div class="detail-wrap" id="detail-wrap"></div>
+    </div>
+    <div class="page" id="page-classroom">
+      <button class="back-bar" onclick="showPage('home')">‹ 首頁</button>
+      <div class="classroom-detail" id="classroom-detail"></div>
+    </div>
+  </div>
+  <div class="bottom-nav">
+    <button class="nav-tab active" id="tab-home" onclick="showPage('home')">
+      <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg></span>
+      <span class="nav-label">首頁</span>
+    </button>
+    <button class="nav-tab" id="tab-schedule" onclick="showPage('schedule')">
+      <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span>
+      <span class="nav-label">本週排課</span>
+    </button>
+    <button class="nav-tab" id="tab-students" onclick="showPage('students')">
+      <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M16 3.13a4 4 0 010 7.75M21 21v-2a4 4 0 00-3-3.87"/></svg></span>
+      <span class="nav-label">學生</span>
+    </button>
+  </div>
+</div>
+
+<!-- ADD/EDIT RECORD SHEET -->
+<div class="overlay" id="sheet-record">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="rec-sheet-title">📝 新增上課紀錄</div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <label class="form-label">學生</label>
+        <select class="form-select" id="rec-student"></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">日期</label><input class="form-input" type="date" id="rec-date"></div>
+        <div class="form-group"><label class="form-label">時間</label><input class="form-input" type="time" id="rec-time"></div>
+      </div>
+      <div class="form-group"><label class="form-label">上課內容</label><textarea class="form-textarea" id="rec-content" placeholder="練習內容、曲目…"></textarea></div>
+      <div class="form-group"><label class="form-label">上課狀況</label><textarea class="form-textarea" id="rec-status" placeholder="今天表現…"></textarea></div>
+      <div class="form-group"><label class="form-label">其他事項</label><input class="form-input" id="rec-note" placeholder="未印譜、點歌…"></div>
+      <div class="form-group">
+        <label class="form-label">⭐ 超級讚</label>
+        <div class="star-picker" id="star-picker">
+          <button class="star-opt active" data-v="0" onclick="pickStar(0)">✕</button>
+          <button class="star-opt" data-v="1" onclick="pickStar(1)">⭐</button>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-record')">取消</button>
+      <button class="btn-save" id="save-rec-btn" onclick="saveRecord()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT STUDENT SHEET -->
+<div class="overlay" id="sheet-student">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="stu-sheet-title">👤 新增學生</div>
+    <div class="sheet-body">
+      <div class="form-group"><label class="form-label">姓名</label><input class="form-input" id="stu-name" placeholder="學生姓名"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">教室</label>
+          <select class="form-select" id="stu-room" onchange="updateDays()">
+            <option>楊梅宏音 Yamaha</option><option>林口星玥</option><option>內壢奧莉琪</option><option>藝文鹿納</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">星期</label><select class="form-select" id="stu-day"></select></div>
+      </div>
+      <div class="form-group"><label class="form-label">上課時間</label>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">上課時間</label>
+          <select class="form-select" id="stu-time">
+            <option value="08:00">08:00</option><option value="08:30">08:30</option>
+            <option value="09:00">09:00</option><option value="09:30">09:30</option>
+            <option value="10:00">10:00</option><option value="10:30">10:30</option>
+            <option value="11:00">11:00</option><option value="11:30">11:30</option>
+            <option value="12:00">12:00</option><option value="12:30">12:30</option>
+            <option value="13:00">13:00</option><option value="13:30">13:30</option>
+            <option value="14:00">14:00</option><option value="14:30">14:30</option>
+            <option value="15:00">15:00</option><option value="15:30">15:30</option>
+            <option value="16:00">16:00</option><option value="16:30">16:30</option>
+            <option value="17:00">17:00</option><option value="17:30">17:30</option>
+            <option value="18:00">18:00</option><option value="18:30">18:30</option>
+            <option value="19:00" selected>19:00</option><option value="19:30">19:30</option>
+            <option value="20:00">20:00</option><option value="20:30">20:30</option>
+            <option value="21:00">21:00</option><option value="21:30">21:30</option>
+            <option value="22:00">22:00</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">上課時長</label>
+          <select class="form-select" id="stu-duration">
+            <option value="30">30 分鐘</option>
+            <option value="60" selected>60 分鐘（預設）</option>
+            <option value="90">90 分鐘</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label class="form-label">狀態</label>
+        <select class="form-select" id="stu-status"><option>正常上課</option><option>暫停上課</option><option>不上課</option></select>
+      </div>
+      <div class="form-group"><label class="form-label">備註</label><textarea class="form-textarea" id="stu-note" placeholder="習慣、注意事項…"></textarea></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-student')">取消</button>
+      <button class="btn-save" id="save-stu-btn" onclick="saveStudent()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM DIALOG -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirm-title">確認刪除</div>
+    <div class="confirm-msg" id="confirm-msg">確定要刪除嗎？此操作無法復原。</div>
+    <div class="confirm-btns">
+      <button class="confirm-cancel" onclick="closeConfirm()">取消</button>
+      <button class="confirm-delete" id="confirm-ok">刪除</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const NOTION_TOKEN='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';
+const DB_STUDENTS='35ed68e58caf8072b186f51ff4aa9d09';
+const DB_RECORDS='35ed68e58caf8069bb38fc4d6d821494';
+const PROXY='https://notion-proxy.doristtn.workers.dev/?url=';
+
+const CLASSROOMS=[
+  {id:'yamaha',name:'楊梅宏音 Yamaha',days:['週四','週五','週六'],color:'#d4854a',icon:'🎵',tag:'tag-yamaha'},
+  {id:'linkou',name:'林口星玥',days:['週日','週一'],color:'#4a90d4',icon:'🌙',tag:'tag-linkou'},
+  {id:'neili',name:'內壢奧莉琪',days:['週二','週三','週六'],color:'#904ad4',icon:'🎶',tag:'tag-neili'},
+  {id:'yiwen',name:'藝文鹿納',days:['週六'],color:'#4ad490',icon:'🦌',tag:'tag-yiwen'},
+];
+const DAYS=['週一','週二','週三','週四','週五','週六','週日'];
+const COLORS=['#5c3a1e','#1e3a5c','#3a1e5c','#1e5c3a','#5c1e3a','#1e5c5c','#3a5c1e','#5c4a1e','#1e4a5c'];
+
+let students=[],records=[],selStar=0,curStudent=null,detailFrom='students',stuFilter='全部';
+let editingRecordId=null, editingStudentId=null;
+
+async function notionAPI(method,path,body){
+  const url=`https://api.notion.com/v1${path}`;
+  const opts={method,headers:{'Authorization':`Bearer ${NOTION_TOKEN}`,'Notion-Version':'2022-06-28','Content-Type':'application/json'}};
+  if(body) opts.body=JSON.stringify(body);
+  const r=await fetch(PROXY+encodeURIComponent(url),opts);
+  if(!r.ok) throw new Error(`Notion API error: ${r.status}`);
+  return r.json();
+}
+async function queryDB(dbId,filter,sorts){
+  const body={page_size:100};
+  if(filter) body.filter=filter;
+  if(sorts) body.sorts=sorts;
+  const data=await notionAPI('POST',`/databases/${dbId}/query`,body);
+  return data.results||[];
+}
+function gp(page,name,type){
+  const p=page.properties?.[name];
+  if(!p) return type==='number'?0:'';
+  if(type==='title') return p.title?.[0]?.plain_text||'';
+  if(type==='select') return p.select?.name||'';
+  if(type==='rich_text') return p.rich_text?.map(r=>r.plain_text).join('')||'';
+  if(type==='date') return p.date?.start||'';
+  if(type==='number') return p.number??0;
+  if(type==='relation') return p.relation?.[0]?.id||'';
+  if(type==='files') return p.files?.[0]?.file?.url||p.files?.[0]?.external?.url||'';
+  return '';
+}
+
+async function loadStudents(){
+  const pages=await queryDB(DB_STUDENTS,null,[{property:'學生',direction:'ascending'}]);
+  students=pages.map((p,i)=>({
+    id:p.id,
+    name:gp(p,'學生','title'),
+    room:gp(p,'教室','select'),
+    day:gp(p,'星期','select'),
+    time:normalizeTime(gp(p,'上課時間','rich_text')),
+    duration:gp(p,'上課時長','rich_text')||'60',
+    status:gp(p,'狀態','select'),
+    note:gp(p,'備註','rich_text'),
+    photo:gp(p,'照片','files'),
+    color:COLORS[i%COLORS.length],
+  }));
+}
+async function loadRecords(){
+  const pages=await queryDB(DB_RECORDS,null,[{property:'日期',direction:'descending'}]);
+  records=pages.map(p=>({
+    id:p.id,
+    studentId:gp(p,'學生','relation'),
+    date:gp(p,'日期','date'),
+    time:normalizeTime(gp(p,'上課時間','rich_text')),
+    content:gp(p,'上課內容紀錄','rich_text'),
+    status:gp(p,'上課狀況','rich_text'),
+    note:gp(p,'其他事項','rich_text'),
+    stars:gp(p,'超級讚點數','number'),
+  }));
+}
+async function createRecord(data){
+  const stu=students.find(s=>s.id===data.studentId);
+  return notionAPI('POST','/pages',{parent:{database_id:DB_RECORDS},properties:{
+    '名稱':{title:[{text:{content:`${stu?.name||''} ${data.date}`}}]},
+    '日期':{date:{start:data.date}},
+    '學生':{relation:[{id:data.studentId}]},
+    '上課時間':{rich_text:[{text:{content:data.time}}]},
+    '上課內容紀錄':{rich_text:[{text:{content:data.content}}]},
+    '上課狀況':{rich_text:[{text:{content:data.status}}]},
+    '其他事項':{rich_text:[{text:{content:data.note}}]},
+    '超級讚點數':{number:data.stars},
+  }});
+}
+async function updateRecord(id,data){
+  return notionAPI('PATCH',`/pages/${id}`,{properties:{
+    '日期':{date:{start:data.date}},
+    '上課時間':{rich_text:[{text:{content:data.time}}]},
+    '上課內容紀錄':{rich_text:[{text:{content:data.content}}]},
+    '上課狀況':{rich_text:[{text:{content:data.status}}]},
+    '其他事項':{rich_text:[{text:{content:data.note}}]},
+    '超級讚點數':{number:data.stars},
+  }});
+}
+async function deleteRecord(id){ return notionAPI('DELETE',`/pages/${id}`,null); }
+async function deletePage(id){ return notionAPI('PATCH',`/pages/${id}`,{archived:true}); }
+async function updateStudent(id,data){
+  return notionAPI('PATCH',`/pages/${id}`,{properties:{
+    '教室':{select:{name:data.room}},
+    '星期':{select:{name:data.day}},
+    '上課時間':{rich_text:[{text:{content:normalizeTime(data.time||'')}}]},
+    '上課時長':{rich_text:[{text:{content:String(data.duration||'60')}}]},
+    '狀態':{select:{name:data.status}},
+    '備註':{rich_text:[{text:{content:String(data.note||'')}}]},
+  }});
+}
+async function createStudent(data){
+  const props={
+    '學生':{title:[{text:{content:String(data.name||'')}}]},
+    '教室':{select:{name:String(data.room||'楊梅宏音 Yamaha')}},
+    '星期':{select:{name:String(data.day||'週四')}},
+  };
+  const result=await notionAPI('POST','/pages',{parent:{database_id:DB_STUDENTS},properties:props});
+  const extra={};
+  extra['上課時間']={rich_text:[{text:{content:normalizeTime(String(data.time||'19:00'))}}]};
+  extra['上課時長']={rich_text:[{text:{content:String(data.duration||'60')}}]};
+  if(data.note) extra['備註']={rich_text:[{text:{content:String(data.note)}}]};
+  if(data.status) extra['狀態']={select:{name:String(data.status)}};
+  await notionAPI('PATCH',`/pages/${result.id}`,{properties:extra});
+  return result;
+}
+
+function roomOf(n){return CLASSROOMS.find(c=>c.name===n)||CLASSROOMS[0];}
+function totalStars(id){return records.filter(r=>r.studentId===id).reduce((s,r)=>s+(r.stars||0),0);}
+function cycleStars(id){const t=totalStars(id);const c=t%3;return t>0&&c===0?3:c;}
+function starsUI(n){return'⭐'.repeat(n)+'☆'.repeat(3-n);}
+function todayStr(){return new Date().toISOString().slice(0,10);}
+function nowTime(){const n=new Date();return`${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;}
+function statusTag(s){return{正常上課:'tag-active',暫停上課:'tag-pause',不上課:'tag-stop'}[s]||'tag-active';}
+function statusDot(s){return{正常上課:'#4a9060',暫停上課:'#c8a84a',不上課:'#c46a6a'}[s]||'#4a9060';}
+function isInactive(s){return s.status==='不上課';}
+// 統一時間格式：1500 → 15:00，19:00 → 19:00
+function normalizeTime(t){
+  if(!t) return '';
+  t=String(t).trim();
+  if(t.includes(':')) return t; // 已經是 HH:MM
+  if(t.length===3) t='0'+t;    // 900 → 0900
+  if(t.length===4) return t.slice(0,2)+':'+t.slice(2); // 1500 → 15:00
+  return t;
+}
+function timeToMin(t){
+  if(!t) return 9999;
+  const norm=normalizeTime(t);
+  const[h,m]=(norm+':00').split(':');
+  return parseInt(h)*60+parseInt(m);
+}
+// 依教室決定頭像顏色
+const ROOM_COLORS={
+  '楊梅宏音 Yamaha':'#7a4a2a', // 橘
+  '林口星玥':'#1e3a5c',         // 藍
+  '內壢奧莉琪':'#3a1e5c',       // 紫
+  '藝文鹿納':'#1e5c3a',         // 綠
+};
+function roomColor(room){return ROOM_COLORS[room]||'#2a3a2a';}
+
+function avatarHtml(s,size){
+  const sz=size||44;
+  if(s.photo) return`<img src="${s.photo}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;">`;
+  const bg=roomColor(s.room);
+  return`<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:${Math.round(sz*0.4)}px;font-weight:700;color:#ececec;">${s.name[0]}</div>`;
+}
+
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+(function(){
+  const n=new Date();const dw=['日','一','二','三','四','五','六'];
+  const headerStr=`${n.getMonth()+1}/${n.getDate()} 週${dw[n.getDay()]}`;
+  const heroStr=`${n.getFullYear()}年${n.getMonth()+1}月${n.getDate()}日・週${dw[n.getDay()]}`;
+  
+  document.getElementById('hero-date').textContent=heroStr;
+})();
+
+let curPage='home';
+function showPage(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
+  curPage=id;
+  const titles={home:'首頁',schedule:'本週排課',students:'學生',detail:'學生資料',classroom:'教室'};
+  document.getElementById('header-title').textContent=titles[id]||'首頁';
+  const btn=document.getElementById('header-btn');
+  if(id==='students'){btn.textContent='＋ 學生';btn.onclick=()=>openAddStudent();}
+  else if(id==='detail'||id==='classroom'){btn.style.display='none';}
+  else{btn.style.display='';btn.textContent='＋ 紀錄';btn.onclick=()=>openAddRecord();}
+  if(id==='home') renderHome();
+  if(id==='schedule') renderSchedule();
+  if(id==='students') renderStudents();
+  document.getElementById('main-content').scrollTop=0;
+}
+
+function renderHome(){
+
+
+  document.getElementById('stat-row').innerHTML=`
+    <div class="stat-card"><div class="stat-num">${students.length}</div><div class="stat-label">總學生數</div></div>
+    <div class="stat-card"><div class="stat-num">${records.filter(r=>r.date===todayStr()).length}</div><div class="stat-label">今日上課堂數</div></div>
+    <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
+  document.getElementById('classroom-list').innerHTML=CLASSROOMS.map(c=>{
+    const cnt=students.filter(s=>s.room===c.name).length;
+    return`<div class="classroom-row" onclick="openClassroom('${c.name}')">
+      <div class="cr-dot" style="background:${c.color};"></div>
+      <div class="cr-info"><div class="cr-name">${c.icon} ${c.name}</div><div class="cr-days">${c.days.join(' · ')}</div></div>
+      <div class="cr-count">${cnt}</div><div class="cr-arrow">›</div>
+    </div>`;
+  }).join('');
+}
+
+// ── SCHEDULE: 固定時間軸週日曆 ──
+function renderSchedule(){
+  const todayJS=new Date().getDay();
+  const jsToIdx=[6,0,1,2,3,4,5];
+  const DAY_SHORT=['一','二','三','四','五','六','日'];
+  const now=new Date();
+  const curDow=now.getDay();
+  const weekDates=DAYS.map((_,i)=>{
+    const twIdx=[1,2,3,4,5,6,0];
+    const diff=twIdx[i]-curDow;
+    const d=new Date(now);d.setDate(now.getDate()+diff);
+    return d;
+  });
+
+  const ROW_H=56; // 每小時高度(px)
+  const HALF_H=ROW_H/2;
+  const START_H=8; // 從08:00開始
+  const END_H=22;  // 到22:00結束
+  const HOURS=Array.from({length:END_H-START_H},(_,i)=>START_H+i); // [8,9,...,21]
+
+  const activeStudents=students.filter(s=>s.status!=='不上課'&&s.status!=='暫停上課');
+
+  const wrap=document.getElementById('schedule-wrap');
+  wrap.style.padding='0';
+  wrap.style.overflowX='auto';
+
+  // 頂部星期列
+  const dayHeaders=`<div style="display:grid;grid-template-columns:36px repeat(7,1fr);background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;">
+    <div style="border-right:1px solid var(--border);"></div>
+    ${DAYS.map((d,i)=>{
+      const isT=jsToIdx[todayJS]===i;
+      const dt=weekDates[i];
+      return`<div style="text-align:center;padding:6px 2px;border-left:1px solid var(--border);">
+        <div style="font-size:10px;color:${isT?'var(--accent)':'var(--text3)'};font-weight:700;">${DAY_SHORT[i]}</div>
+        <div style="font-size:15px;font-weight:900;color:${isT?'var(--accent)':'var(--text)'};width:26px;height:26px;border-radius:50%;${isT?'background:rgba(93,184,122,0.15);':''}display:flex;align-items:center;justify-content:center;margin:2px auto 0;">${dt.getDate()}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+
+  // 時間軸主體（相對定位容器）
+  const totalH=(END_H-START_H)*ROW_H;
+
+  // 畫格線
+  const gridLines=HOURS.map(h=>`
+    <div style="position:absolute;top:${(h-START_H)*ROW_H}px;left:0;right:0;display:grid;grid-template-columns:36px repeat(7,1fr);pointer-events:none;">
+      <div style="text-align:right;padding-right:4px;padding-top:2px;">
+        <span style="font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;">${String(h).padStart(2,'0')}</span>
+      </div>
+      ${DAYS.map(()=>`<div style="border-left:1px solid var(--border);border-top:1px solid var(--border);height:${ROW_H}px;"></div>`).join('')}
+    </div>
+    <div style="position:absolute;top:${(h-START_H)*ROW_H+HALF_H}px;left:36px;right:0;border-top:1px solid var(--border2);opacity:0.4;pointer-events:none;"></div>
+  `).join('');
+
+  // 畫學生格子
+  const studentBlocks=activeStudents.map(s=>{
+    const dayIdx=DAYS.indexOf(s.day);
+    if(dayIdx<0||!s.time) return'';
+    const norm=normalizeTime(s.time);
+    const [hh,mm]=norm.split(':').map(Number);
+    if(hh<START_H||hh>=END_H) return'';
+    const dur=parseInt(s.duration||'60');
+    const rc=roomOf(s.room);
+    const topPx=(hh-START_H)*ROW_H+(mm===30?HALF_H:0);
+    const heightPx=dur===30?HALF_H:dur===90?ROW_H*1.5:ROW_H;
+    // 計算left/width（7欄等寬，從第1欄開始）
+    const colW=`calc((100% - 36px) / 7)`;
+    const leftPx=`calc(36px + ${dayIdx} * (100% - 36px) / 7 + 2px)`;
+    return`<div onclick="openDetail('${s.id}','schedule')" style="
+      position:absolute;
+      top:${topPx}px;
+      left:${leftPx};
+      width:calc((100% - 36px) / 7 - 4px);
+      height:${heightPx-2}px;
+      background:${rc.color}30;
+      border-left:3px solid ${rc.color};
+      border-radius:5px;
+      padding:3px 5px;
+      cursor:pointer;
+      overflow:hidden;
+      z-index:2;
+      box-sizing:border-box;
+    ">
+      <div style="font-size:11px;font-weight:700;color:${rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;">${s.name}</div>
+      ${heightPx>30?`<div style="font-size:9px;color:var(--text3);line-height:1.2;">${norm}${dur!==60?` ${dur}分`:''}</div>`:''}
+    </div>`;
+  }).join('');
+
+  wrap.innerHTML=`<div style="min-width:340px;">
+    ${dayHeaders}
+    <div style="position:relative;height:${totalH}px;overflow:hidden;">
+      ${gridLines}
+      ${studentBlocks}
+    </div>
+  </div>`;
+}
+
+// ── STUDENTS: 週曆卡片樣式 ──
+let stuFilter2='全部';
+function renderStudents(){
+  stuFilter2=stuFilter;
+  const filters=['全部',...CLASSROOMS.map(c=>c.name),'暫停/不上課'];
+  document.getElementById('filter-scroll').innerHTML=filters.map(f=>
+    `<div class="chip${stuFilter===f?' active':''}" onclick="setStuFilter('${f}')">${f}</div>`).join('');
+
+  let list=students;
+  if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status!=='正常上課');
+  else if(stuFilter!=='全部') list=students.filter(s=>s.room===stuFilter&&s.status==='正常上課');
+  else list=students.filter(s=>s.status==='正常上課');
+
+  // 依星期分組，每組內依時間排序
+  const grouped=DAYS.map(d=>({
+    day:d,
+    students:list.filter(s=>s.day===d).sort((a,b)=>timeToMin(a.time)-timeToMin(b.time))
+  })).filter(g=>g.students.length>0);
+
+  document.getElementById('student-items').innerHTML=grouped.length===0?
+    `<div style="text-align:center;padding:40px;color:var(--text3);">沒有學生</div>`:
+    grouped.map(g=>`
+      <div style="margin-bottom:4px;">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;padding:0 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px;">${g.day}</div>
+        ${g.students.map(s=>`<div class="student-row${isInactive(s)?' inactive':''}" onclick="openDetail('${s.id}','students')" style="margin-bottom:6px;">
+          <div class="s-avatar">${avatarHtml(s,44)}</div>
+          <div class="s-info">
+            <div class="s-name">${s.name}</div>
+            <div class="s-meta">${s.room.replace(' Yamaha','')} · ${s.time||'—'}</div>
+          </div>
+          <div class="s-right">
+            <div class="s-stars">${starsUI(cycleStars(s.id))}</div>
+            <div style="width:8px;height:8px;border-radius:50%;background:${statusDot(s.status)};"></div>
+          </div>
+        </div>`).join('')}
+      </div>`).join('');
+}
+function setStuFilter(f){stuFilter=f;renderStudents();}
+
+function openDetail(id,from){
+  curStudent=id;detailFrom=from;
+  document.getElementById('detail-back').onclick=()=>showPage(from==='classroom'?'classroom':from);
+  document.getElementById('student-more-btn').onclick=(e)=>showStudentMenu(e,id);
+  showPage('detail');
+  renderDetail(id);
+}
+
+function renderDetail(id){
+  const s=students.find(x=>x.id===id);if(!s)return;
+  const cy=cycleStars(id);const tot=totalStars(id);
+  const rc=roomOf(s.room);const pct=Math.round((cy/3)*100);
+  const recs=records.filter(r=>r.studentId===id).sort((a,b)=>{
+    const da=new Date((a.date||'2000-01-01')+' '+(a.time||'00:00'));
+    const db2=new Date((b.date||'2000-01-01')+' '+(b.time||'00:00'));
+    return db2-da;
+  });
+  document.getElementById('detail-wrap').innerHTML=`
+    <div class="detail-hero">
+      <div class="dh-top">
+        <div class="dh-avatar">${avatarHtml(s,64)}</div>
+        <div style="flex:1;">
+          <div class="dh-name">${s.name}</div>
+          <div class="dh-tags">
+            <span class="dh-tag ${rc.tag}">${rc.icon} ${s.room}</span>
+            <span class="dh-tag" style="background:var(--card2);color:var(--text2);">${s.day} ${s.time||''}${s.duration&&s.duration!=='60'?' · '+s.duration+'分':''}</span>
+            <span class="dh-tag ${statusTag(s.status)}">${s.status}</span>
+          </div>
+        </div>
+      </div>
+      ${s.note?`<div class="dh-note">📝 ${s.note}</div>`:''}
+      <div class="stars-card" style="margin-top:14px;">
+        <div class="sc-left">
+          <div class="sc-label">超級讚累積</div>
+          <div class="sc-stars">${starsUI(cy)}</div>
+          <div class="sc-sub">累積 ${tot} 顆 · ${cy===0&&tot>0?'🎉滿了！':'還差 '+(3-cy)+' 顆'}</div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;"></div></div>
+        </div>
+        <div class="sc-right"><div class="sc-num">${cy}/3</div><div class="sc-numlab">本輪</div></div>
+      </div>
+    </div>
+    <div class="rec-section-head">
+      <div><div class="section-title">上課紀錄</div><div class="rec-count">${recs.length} 筆，由新到舊</div></div>
+      <button class="add-rec-btn" onclick="openAddRecord('${id}')">＋ 新增</button>
+    </div>
+    <div class="rec-list">${recs.length===0?
+      `<div class="rec-empty">📝 還沒有上課紀錄</div>`:
+      recs.map(r=>`<div class="rec-card">
+        <div class="rec-card-top">
+          <div class="rec-date">${r.date||'—'}</div>
+          <div class="rec-time">${r.time||'—'}</div>
+          <div class="rec-stars-badge" style="margin-left:auto;">${r.stars?'⭐':'—'}</div>
+          <button class="rec-more-btn" onclick="showRecMenu(event,'${r.id}')">···</button>
+        </div>
+        <div class="rec-body">
+          ${r.content?`<div class="rec-field"><div class="rf-label">內容</div><div class="rf-val">${r.content}</div></div>`:''}
+          ${r.status?`<div class="rec-field"><div class="rf-label">狀況</div><div class="rf-val">${r.status}</div></div>`:''}
+          ${r.note?`<div class="rec-field"><div class="rf-label">其他</div><div class="rf-val">${r.note}</div></div>`:''}
+        </div>
+      </div>`).join('')
+    }</div>`;
+}
+
+function openClassroom(name){
+  showPage('classroom');
+  const rc=roomOf(name);
+  const sts=students.filter(s=>s.room===name);
+  document.getElementById('classroom-detail').innerHTML=`
+    <div class="cd-hero">
+      <div class="cd-icon" style="background:${rc.color}22;">${rc.icon}</div>
+      <div><div class="cd-name">${name}</div><div class="cd-days">${rc.days.join(' · ')}</div></div>
+      <div class="cd-cnt"><div class="cd-cnt-num">${sts.length}</div><div class="cd-cnt-lab">位學生</div></div>
+    </div>
+    ${rc.days.map(d=>{
+      const ds=sts.filter(s=>s.day===d).sort((a,b)=>timeToMin(a.time)-timeToMin(b.time));
+      return`<div class="day-group">
+        <div class="day-group-title">${d}（${ds.length} 位）</div>
+        ${ds.map(s=>`<div class="student-row${isInactive(s)?' inactive':''}" onclick="openDetail('${s.id}','classroom')" style="margin-bottom:8px;">
+          <div class="s-avatar">${avatarHtml(s,44)}</div>
+          <div class="s-info"><div class="s-name">${s.name}</div><div class="s-meta">${s.time||'—'}</div></div>
+          <div class="s-right"><div class="s-stars">${starsUI(cycleStars(s.id))}</div>
+          <div style="width:8px;height:8px;border-radius:50%;background:${statusDot(s.status)};"></div></div>
+        </div>`).join('')}
+      </div>`;}).join('')}`;
+}
+
+// ── POPUP MENUS ──
+function closePopup(){document.querySelectorAll('.popup-menu,.popup-overlay').forEach(e=>e.remove());}
+
+function showRecMenu(e,recId){
+  e.stopPropagation();closePopup();
+  const menu=document.createElement('div');menu.className='popup-menu';
+  const rect=e.target.getBoundingClientRect();
+  menu.style.top=(rect.bottom+6)+'px';menu.style.right=(window.innerWidth-rect.right+4)+'px';
+  menu.innerHTML=`
+    <div class="popup-item" onclick="editRecord('${recId}')">✎ 編輯</div>
+    <div class="popup-item danger" onclick="confirmDeleteRecord('${recId}')">🗑 刪除</div>`;
+  const ov=document.createElement('div');ov.className='popup-overlay';ov.onclick=closePopup;
+  document.body.appendChild(ov);document.body.appendChild(menu);
+}
+
+function showStudentMenu(e,stuId){
+  e.stopPropagation();closePopup();
+  const menu=document.createElement('div');menu.className='popup-menu';
+  const rect=e.target.getBoundingClientRect();
+  menu.style.top=(rect.bottom+6)+'px';menu.style.right=(window.innerWidth-rect.right+4)+'px';
+  menu.innerHTML=`
+    <div class="popup-item" onclick="editStudent('${stuId}')">✎ 編輯</div>
+    <div class="popup-item danger" onclick="confirmDeleteStudent('${stuId}')">🗑 刪除</div>`;
+  const ov=document.createElement('div');ov.className='popup-overlay';ov.onclick=closePopup;
+  document.body.appendChild(ov);document.body.appendChild(menu);
+}
+
+// ── CONFIRM ──
+let confirmCallback=null;
+function showConfirm(title,msg,cb){
+  document.getElementById('confirm-title').textContent=title;
+  document.getElementById('confirm-msg').textContent=msg;
+  confirmCallback=cb;
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+function closeConfirm(){document.getElementById('confirm-overlay').classList.remove('show');confirmCallback=null;}
+document.getElementById('confirm-ok').onclick=()=>{if(confirmCallback){confirmCallback();closeConfirm();}};
+
+function confirmDeleteRecord(id){
+  closePopup();
+  showConfirm('刪除上課紀錄','確定要刪除這筆紀錄嗎？此操作無法復原。',async()=>{
+    try{
+      await deletePage(id);
+      await loadRecords();
+      renderDetail(curStudent);
+      showToast('✅ 紀錄已刪除');
+    }catch(e){showToast('❌ 刪除失敗');}
+  });
+}
+
+function confirmDeleteStudent(id){
+  closePopup();
+  const s=students.find(x=>x.id===id);
+  showConfirm('刪除學生',`確定要刪除「${s?.name||''}」嗎？此操作無法復原。`,async()=>{
+    try{
+      await deletePage(id);
+      await loadStudents();
+      showPage(detailFrom==='classroom'?'classroom':'students');
+      showToast('✅ 學生已刪除');
+    }catch(e){showToast('❌ 刪除失敗');}
+  });
+}
+
+// ── RECORD SHEET ──
+function openAddRecord(sid){
+  editingRecordId=null;
+  document.getElementById('rec-sheet-title').textContent='📝 新增上課紀錄';
+  const sel=document.getElementById('rec-student');
+  sel.innerHTML=students.map(s=>`<option value="${s.id}"${s.id===sid?' selected':''}>${s.name} · ${s.day}</option>`).join('');
+  document.getElementById('rec-date').value=todayStr();
+  document.getElementById('rec-time').value=nowTime();
+  document.getElementById('rec-content').value='';
+  document.getElementById('rec-status').value='';
+  document.getElementById('rec-note').value='';
+  pickStar(0);
+  document.getElementById('sheet-record').classList.add('show');
+}
+
+function editRecord(id){
+  closePopup();
+  const r=records.find(x=>x.id===id);if(!r)return;
+  editingRecordId=id;
+  document.getElementById('rec-sheet-title').textContent='✎ 編輯上課紀錄';
+  const sel=document.getElementById('rec-student');
+  sel.innerHTML=students.map(s=>`<option value="${s.id}"${s.id===r.studentId?' selected':''}>${s.name} · ${s.day}</option>`).join('');
+  sel.disabled=true;
+  document.getElementById('rec-date').value=r.date||todayStr();
+  document.getElementById('rec-time').value=r.time||'';
+  document.getElementById('rec-content').value=r.content||'';
+  document.getElementById('rec-status').value=r.status||'';
+  document.getElementById('rec-note').value=r.note||'';
+  pickStar(r.stars||0);
+  document.getElementById('sheet-record').classList.add('show');
+}
+
+async function saveRecord(){
+  const btn=document.getElementById('save-rec-btn');
+  btn.textContent='儲存中…';btn.disabled=true;
+  try{
+    const data={
+      studentId:document.getElementById('rec-student').value,
+      date:document.getElementById('rec-date').value,
+      time:document.getElementById('rec-time').value,
+      content:document.getElementById('rec-content').value.trim(),
+      status:document.getElementById('rec-status').value.trim(),
+      note:document.getElementById('rec-note').value.trim(),
+      stars:selStar,
+    };
+    if(editingRecordId) await updateRecord(editingRecordId,data);
+    else await createRecord(data);
+    await loadRecords();
+    closeSheet('sheet-record');
+    document.getElementById('rec-student').disabled=false;
+    showToast(editingRecordId?'✅ 紀錄已更新！':'✅ 紀錄已儲存到 Notion！');
+    if(curPage==='detail') renderDetail(curStudent);
+    if(curPage==='home') renderHome();
+  }catch(e){showToast('❌ 儲存失敗，請重試');console.error(e);}
+  btn.textContent='✅ 儲存';btn.disabled=false;
+}
+
+// ── STUDENT SHEET ──
+function openAddStudent(){
+  editingStudentId=null;
+  document.getElementById('stu-sheet-title').textContent='👤 新增學生';
+  document.getElementById('stu-name').value='';
+  document.getElementById('stu-name').disabled=false;
+  document.getElementById('stu-room').value='楊梅宏音 Yamaha';
+  updateDays();
+  document.getElementById('stu-time').value='19:00';
+  document.getElementById('stu-duration').value='60';
+  document.getElementById('stu-status').value='正常上課';
+  document.getElementById('stu-note').value='';
+  document.getElementById('sheet-student').classList.add('show');
+}
+
+function editStudent(id){
+  closePopup();
+  const s=students.find(x=>x.id===id);if(!s)return;
+  editingStudentId=id;
+  document.getElementById('stu-sheet-title').textContent='✎ 編輯學生資料';
+  document.getElementById('stu-name').value=s.name;document.getElementById('stu-name').disabled=true;
+  document.getElementById('stu-room').value=s.room;updateDays();
+  document.getElementById('stu-day').value=s.day;
+  document.getElementById('stu-time').value=s.time||'19:00';
+  document.getElementById('stu-duration').value=s.duration||'60';
+  document.getElementById('stu-status').value=s.status||'正常上課';
+  document.getElementById('stu-note').value=s.note||'';
+  document.getElementById('sheet-student').classList.add('show');
+}
+
+async function saveStudent(){
+  const name=document.getElementById('stu-name').value.trim();
+  if(!editingStudentId&&!name){showToast('請輸入學生姓名');return;}
+  const btn=document.getElementById('save-stu-btn');
+  btn.textContent='儲存中…';btn.disabled=true;
+  try{
+    const data={
+      name:name||'',
+      room:document.getElementById('stu-room').value,
+      day:document.getElementById('stu-day').value,
+      time:document.getElementById('stu-time').value,
+      duration:document.getElementById('stu-duration').value,
+      status:document.getElementById('stu-status').value,
+      note:document.getElementById('stu-note').value.trim(),
+    };
+    console.log('saving student:',data,editingStudentId);
+    if(editingStudentId) await updateStudent(editingStudentId,data);
+    else await createStudent(data);
+    await loadStudents();
+    closeSheet('sheet-student');
+    document.getElementById('stu-name').disabled=false;
+    showToast(editingStudentId?'✅ 學生資料已更新！':'✅ 學生已新增！');
+    if(curPage==='detail') renderDetail(curStudent);
+    else{renderStudents();renderHome();}
+  }catch(e){
+    showToast('❌ 儲存失敗：'+e.message);
+    console.error('saveStudent error:',e);
+  }
+  btn.textContent='✅ 儲存';btn.disabled=false;
+}
+
+function closeSheet(id){
+  document.getElementById(id).classList.remove('show');
+  document.getElementById('rec-student').disabled=false;
+  document.getElementById('stu-name').disabled=false;
+}
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)closeSheet(o.id);}));
+function pickStar(n){selStar=n;document.querySelectorAll('.star-opt').forEach(b=>b.classList.toggle('active',parseInt(b.dataset.v)===n));}
+function updateDays(){
+  const room=document.getElementById('stu-room').value;
+  const rc=roomOf(room);
+  document.getElementById('stu-day').innerHTML=rc.days.map(d=>`<option>${d}</option>`).join('');
+}
+
+async function init(){
+  document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
+  try{
+    await Promise.all([loadStudents(),loadRecords()]);
+    renderHome();
+    showToast('✅ 已連接 Notion');
+  }catch(e){
+    document.getElementById('stat-row').innerHTML=`<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--red);">❌ 無法連接 Notion<br><small>${e.message}</small></div>`;
+  }
+}
+updateDays();init();
+</script>
+</body>
+</html>
