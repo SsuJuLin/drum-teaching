@@ -239,6 +239,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         </div>
       </div>
       <div class="stat-row" id="stat-row"></div>
+      <div id="cmd-box"></div>
       <div id="unrec-card"></div>
       <div id="gcal-panel"></div>
       <div class="section-head"><div class="section-title">📍 教室</div></div>
@@ -1205,6 +1206,223 @@ async function isTeacherOnLeave(ds){
   return (d&&d.items||[]).some(e=>e.status!=='cancelled');
 }
 
+// ══════════ 指令輸入（A：規則解析；之後 B 的 AI 只要回傳同樣格式即可接上）══════════
+const CN_NUM={'零':0,'一':1,'二':2,'兩':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+function cnToInt(t){
+  if(/^\d+$/.test(t)) return parseInt(t);
+  if(t==='十') return 10;
+  if(t.length===2&&t[0]==='十') return 10+CN_NUM[t[1]];
+  if(t.length===2&&t[1]==='十') return CN_NUM[t[0]]*10;
+  if(t.length===3&&t[1]==='十') return CN_NUM[t[0]]*10+CN_NUM[t[2]];
+  return CN_NUM[t]??NaN;
+}
+function cleanName(n){return (n||'').replace(/[^\p{L}\p{N}]/gu,'').toLowerCase();}
+function resolveMD(m,d,y){
+  const pad=n=>String(n).padStart(2,'0');
+  if(y) return `${y}-${pad(m)}-${pad(d)}`;
+  const td=twToday();let yr=parseInt(td.slice(0,4));
+  let ds=`${yr}-${pad(m)}-${pad(d)}`;
+  if(ds<addDays(td,-60)) ds=`${yr+1}-${pad(m)}-${pad(d)}`;
+  return ds;
+}
+// 找出所有日期（含位置）
+function findDates(text){
+  const out=[];const push=(i,len,ds)=>out.push({i,len,ds});
+  let m;
+  const r1=/(\d{4})\s*[\/.\-年]\s*(\d{1,2})\s*[\/.\-月]\s*(\d{1,2})\s*[日號]?/g;
+  while((m=r1.exec(text))) push(m.index,m[0].length,resolveMD(+m[2],+m[3],+m[1]));
+  const r2=/(\d{1,2})\s*[\/月]\s*(\d{1,2})\s*[日號]?/g;
+  while((m=r2.exec(text))){ if(out.some(o=>m.index>=o.i&&m.index<o.i+o.len)) continue; push(m.index,m[0].length,resolveMD(+m[1],+m[2])); }
+  const rel={'今天':0,'今日':0,'明天':1,'明日':1,'後天':2,'大後天':3,'昨天':-1};
+  const r3=/大後天|今天|今日|明天|明日|後天|昨天/g;
+  while((m=r3.exec(text))) push(m.index,m[0].length,addDays(twToday(),rel[m[0]]));
+  const r4=/(這|本|下下|下)?\s*(週|周|星期|禮拜|拜)\s*([一二三四五六日天])/g;
+  while((m=r4.exec(text))){
+    const idx='一二三四五六日天'.indexOf(m[3]);const di=idx===7?6:idx;
+    let ds;
+    if(m[1]==='下') ds=addDays(mondayOf(1),di);
+    else if(m[1]==='下下') ds=addDays(mondayOf(2),di);
+    else if(m[1]==='這'||m[1]==='本') ds=addDays(mondayOf(0),di);
+    else ds=nextDateFor(DAYS[di]);
+    push(m.index,m[0].length,ds);
+  }
+  return out.sort((a,b)=>a.i-b.i);
+}
+function findTimes(text){
+  const out=[];let m;
+  const adj=(h,pre)=>{ if((pre==='下午'||pre==='晚上'||pre==='傍晚')&&h<12) h+=12; if(pre==='中午'&&h<6) h+=12; if(!pre&&h>=1&&h<=7) h+=12; return h; };
+  const pad=n=>String(n).padStart(2,'0');
+  const r1=/(早上|上午|中午|下午|傍晚|晚上)?\s*(\d{1,2})\s*[:：]\s*(\d{2})/g;
+  while((m=r1.exec(text))) out.push({i:m.index,len:m[0].length,t:`${pad(adj(+m[2],m[1]))}:${m[3]}`});
+  const r2=/(早上|上午|中午|下午|傍晚|晚上)?\s*(\d{1,2}|[一二兩三四五六七八九十]{1,3})\s*點\s*(半|(\d{1,2}|[一二三四五六七八九十]{1,3})\s*分?)?/g;
+  while((m=r2.exec(text))){
+    const h=cnToInt(m[2]);if(isNaN(h)) continue;
+    const mi=m[3]==='半'?30:m[4]?cnToInt(m[4]):0;
+    out.push({i:m.index,len:m[0].length,t:`${pad(adj(h,m[1]))}:${pad(mi||0)}`});
+  }
+  return out.sort((a,b)=>a.i-b.i);
+}
+function findStudent(text){
+  const t=cleanName(text);
+  let c=students.filter(s=>cleanName(s.name)&&t.includes(cleanName(s.name)));
+  if(!c.length) c=students.filter(s=>{const n=cleanName(s.name);return n.length>=3&&t.includes(n.slice(-2));});
+  if(!c.length) return null;
+  c.sort((a,b)=>cleanName(b.name).length-cleanName(a.name).length);
+  const top=cleanName(c[0].name).length;
+  const same=c.filter(x=>cleanName(x.name).length===top);
+  if(same.length>1){const act=same.filter(x=>x.status==='正常上課');if(act.length===1) return act[0];return{ambig:same};}
+  return c[0];
+}
+function parseCommand(text){
+  const dates=findDates(text),times=findTimes(text);
+  const st=findStudent(text);
+  // 老師請假
+  if(/停課|(我|老師).{0,8}請假|請假.{0,3}(我|老師)/.test(text)&&(!st||/(我|老師)\s*(要)?請假|停課/.test(text))){
+    if(!dates.length) return{error:'請說明請假日期，例如「11/16-11/24 我請假 出差」'};
+    const d1=dates[0].ds,d2=dates.length>1?dates[1].ds:d1;
+    const note=text.replace(/.*請假/,'').replace(/[，,。]/g,' ').trim();
+    return{action:'teacherLeave',date:d1,date2:d2<d1?d1:d2,note};
+  }
+  if(!st) return{error:'找不到學生名字，請確認名字有打對'};
+  if(st.ambig) return{error:`有好幾位符合：${st.ambig.map(x=>x.name).join('、')}，請打完整名字`};
+  const moveRe=/調到|改到|換到|移到|挪到|改成|改為|調成|→|->|調課|改時間/;
+  if(/恢復|取消請假|銷假/.test(text)){
+    if(!dates.length) return{error:'請加上日期，例如「小明 10/31 恢復」'};
+    return{action:'restore',student:st,date:dates[0].ds};
+  }
+  if(moveRe.test(text)){
+    const mi=text.search(moveRe);
+    const before=dates.filter(d=>d.i<mi),after=dates.filter(d=>d.i>mi);
+    const tAfter=times.filter(t=>t.i>mi);
+    const from=before[0]||dates[0];
+    if(!from) return{error:'請加上原本的日期，例如「小明 10/31 調到 11/2 19:00」'};
+    const to=after[0]||(before.length>1?before[1]:null);
+    if(!to&&!tAfter.length) return{error:'請加上要調到的日期或時間，例如「調到 11/2 19:00」'};
+    return{action:'move',student:st,date:from.ds,newDate:to?to.ds:null,newTime:tAfter.length?tAfter[0].t:null};
+  }
+  if(/補課|約課|加課|排課/.test(text)&&!/取消/.test(text)){
+    if(!dates.length) return{error:'請加上日期，例如「小明 11/5 15:00 補課」'};
+    return{action:'book',student:st,date:dates[0].ds,time:times.length?times[0].t:(st.time?pad5(st.time):null)};
+  }
+  if(/取消/.test(text)){
+    if(!dates.length) return{error:'請加上日期'};
+    return{action:'cancel',student:st,date:dates[0].ds};
+  }
+  if(/請假|不來|不能來|沒辦法來|缺席|生病/.test(text)){
+    if(!dates.length) return{error:'請加上日期，例如「小明 10/31 請假」'};
+    return{action:'leave',student:st,date:dates[0].ds};
+  }
+  return{error:'看不懂這個指令，可以參考下方範例的寫法'};
+}
+async function lessonsOn(sid,ds){
+  const d=await gcal('GET','/events',null,[['privateExtendedProperty',`studentId=${sid}`],['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true'],['orderBy','startTime']]);
+  return (d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime);
+}
+let cmdPending=null;
+async function runCommand(){
+  const inp=document.getElementById('cmd-input');const text=inp.value.trim();
+  const out=document.getElementById('cmd-result');
+  if(!text) return;
+  if(!gcalValid()){out.innerHTML=cmdMsg('請先連接 Google 日曆',true);return;}
+  out.innerHTML=cmdMsg('解讀中…');
+  const c=parseCommand(text); // ← 之後 B：可先問 AI，回傳同樣格式的物件
+  if(c.error){out.innerHTML=cmdMsg(c.error,true);return;}
+  try{
+    if(c.action==='teacherLeave'){
+      cmdPending=null;out.innerHTML='';
+      openLeave();
+      document.getElementById('leave-start').value=c.date;
+      document.getElementById('leave-end').value=c.date2;
+      document.getElementById('leave-note').value=c.note||'';
+      return;
+    }
+    const s=c.student;const evs=await lessonsOn(s.id,c.date);
+    const day=fmtMD(c.date);
+    let ev=null,desc='';
+    if(c.action==='leave'){
+      ev=evs.find(e=>!evState(e));
+      if(!ev) return out.innerHTML=cmdMsg(`${s.name} ${day} 沒有可以請假的課`,true);
+      const isB=ev.extendedProperties?.private?.kind==='booking';
+      desc=isB?`取消${ev.extendedProperties.private.makeup==='1'?'補課':'約課'}`:'請假';
+      if(isB) c.action='cancel';
+    }else if(c.action==='restore'){
+      ev=evs.find(e=>evState(e)==='leave');
+      if(!ev) return out.innerHTML=cmdMsg(`${s.name} ${day} 沒有請假紀錄`,true);
+      desc='恢復上課';
+    }else if(c.action==='cancel'){
+      ev=evs.find(e=>!evState(e));
+      if(!ev) return out.innerHTML=cmdMsg(`${s.name} ${day} 沒有課`,true);
+      const isB=ev.extendedProperties?.private?.kind==='booking';
+      if(!isB){c.action='leave';desc='請假';}
+      else desc=`取消${ev.extendedProperties.private.makeup==='1'?'補課':'約課'}`;
+    }else if(c.action==='move'){
+      ev=evs.find(e=>!evState(e)||evState(e)==='teacherOff');
+      if(!ev) return out.innerHTML=cmdMsg(`${s.name} ${day} 沒有課可以調`,true);
+      const p=evParts(ev.start.dateTime);
+      c.newDate=c.newDate||p.date;c.newTime=c.newTime||p.hhmm;
+      c.dur=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000)||60;
+      desc=`調課 → ${fmtMD(c.newDate)} ${c.newTime}`;
+    }else if(c.action==='book'){
+      if(!c.time) return out.innerHTML=cmdMsg('請加上時間，例如「15:00」或「下午3點」',true);
+      c.dur=parseInt(s.duration||'60')||60;
+      desc=`新增${isBooking(s)?'約課':'補課'} ${c.time}（${c.dur} 分）`;
+    }
+    const lessonTxt=ev?`${day} ${evParts(ev.start.dateTime).hhmm}`:day;
+    cmdPending={...c,ev};
+    out.innerHTML=`<div style="background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-top:10px;">
+      <div style="font-size:14px;font-weight:700;color:var(--text);">${s.name}・${lessonTxt}</div>
+      <div style="font-size:13px;color:#c8a84a;margin:4px 0 10px;">→ ${desc}</div>
+      <div style="display:flex;gap:8px;"><button class="btn-cancel" style="flex:1;" onclick="cmdPending=null;document.getElementById('cmd-result').innerHTML='';">取消</button>
+      <button class="btn-save" style="flex:1;" id="cmd-ok" onclick="execCommand()">✅ 確定</button></div></div>`;
+  }catch(e){out.innerHTML=cmdMsg(e.message,true);}
+}
+function cmdMsg(t,err){return`<div style="font-size:12px;color:${err?'var(--red)':'var(--text3)'};margin-top:8px;">${err?'⚠️ ':''}${t}</div>`;}
+async function execCommand(){
+  const c=cmdPending;if(!c)return;
+  const btn=document.getElementById('cmd-ok');if(btn){btn.disabled=true;btn.textContent='處理中…';}
+  const out=document.getElementById('cmd-result');
+  try{
+    const s=c.student;
+    if(c.action==='leave') await markEvent(c.ev,'leave');
+    else if(c.action==='restore') await markEvent(c.ev,'');
+    else if(c.action==='cancel') await gcal('DELETE',`/events/${c.ev.id}`);
+    else if(c.action==='move'){
+      if(await isTeacherOnLeave(c.newDate)) throw new Error(`${fmtMD(c.newDate)} 你已請假，不能排課`);
+      const ev=c.ev;const start=twISO(c.newDate,c.newTime);
+      const wasOff=evState(ev)==='teacherOff';
+      const pr={...(ev.extendedProperties?.private||{}),moved:'1'};
+      if(wasOff) pr.fromOff='1';
+      if(!ev.originalStartTime&&!pr.origStart) pr.origStart=ev.start.dateTime;
+      const upd=await gcal('PATCH',`/events/${ev.id}`,{start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,c.dur),timeZone:'Asia/Taipei'},extendedProperties:{private:pr}});
+      if(wasOff&&upd) await markEvent(upd,'');
+    }else if(c.action==='book'){
+      if(await isTeacherOnLeave(c.date)) throw new Error(`${fmtMD(c.date)} 你已請假，不能排課`);
+      const body=evBody(s,c.date,c.time,c.dur,'booking');
+      if(!isBooking(s)){body.extendedProperties.private.makeup='1';body.description='補課（爵士鼓教學系統）';}
+      await gcal('POST','/events',body);
+    }
+    cmdPending=null;weekKey=null;todayKey=null;
+    document.getElementById('cmd-input').value='';
+    out.innerHTML=cmdMsg('✅ 完成');setTimeout(()=>{if(!cmdPending&&out)out.innerHTML='';},2500);
+    showToast('✅ 已更新日曆');
+    await loadToday();if(curPage==='home') renderHome();
+  }catch(e){out.innerHTML=cmdMsg(e.message,true);}
+}
+function cmdBoxHtml(){
+  if(!gcalValid()) return '';
+  return`<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;">
+    <div style="display:flex;gap:8px;">
+      <input id="cmd-input" class="form-input" style="flex:1;margin:0;" placeholder="例：小明 10/31 請假" onkeydown="if(event.key==='Enter'&&!event.isComposing)runCommand()">
+      <button class="add-rec-btn" onclick="runCommand()">送出</button>
+    </div>
+    <div id="cmd-result"></div>
+    <details style="margin-top:8px;"><summary style="font-size:11px;color:var(--text3);cursor:pointer;">指令範例</summary>
+      <div style="font-size:11px;color:var(--text3);line-height:1.9;margin-top:4px;">
+        小明 10/31 請假<br>小明 10/31 恢復<br>小明 10/31 調到 11/2 19:00<br>小明 下週六 改到 下午3點<br>小明 11/5 15:00 補課<br>小明 11/5 取消補課<br>11/16-11/24 我請假 中國出差
+      </div></details>
+  </div>`;
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;';
   const b='border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -1329,6 +1547,9 @@ function renderHome(){
     <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
   document.getElementById('gcal-panel').innerHTML=NOTION_TOKEN?gcalPanelHtml():'';
   document.getElementById('unrec-card').innerHTML=NOTION_TOKEN?unrecHtml():'';
+  const cb=document.getElementById('cmd-box');
+  if(!NOTION_TOKEN||!gcalValid()) cb.innerHTML='';
+  else if(!document.getElementById('cmd-input')) cb.innerHTML=cmdBoxHtml();
   document.getElementById('classroom-list').innerHTML=CLASSROOMS.map(c=>{
     const cnt=students.filter(s=>s.room===c.name).length;
     return`<div class="classroom-row" onclick="openClassroom('${c.name}')">
@@ -1850,6 +2071,7 @@ async function init(){
     document.getElementById('classroom-list').innerHTML='';
     document.getElementById('gcal-panel').innerHTML='';
     document.getElementById('unrec-card').innerHTML='';
+    document.getElementById('cmd-box').innerHTML='';
     return;
   }
   document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
