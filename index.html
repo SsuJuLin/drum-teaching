@@ -640,37 +640,62 @@ function renderSchedule(){
     <div style="position:absolute;top:${(h-START_H)*ROW_H+HALF_H}px;left:36px;right:0;border-top:1px solid var(--border2);opacity:0.4;pointer-events:none;"></div>
   `).join('');
 
-  // 畫學生格子
-  const studentBlocks=activeStudents.map(s=>{
+  // 畫學生格子（同時段重疊 → 同一格內往右錯開、漸層疊放）
+  const evs=[];
+  activeStudents.forEach(s=>{
     const dayIdx=DAYS.indexOf(s.day);
-    if(dayIdx<0||!s.time) return'';
+    if(dayIdx<0||!s.time) return;
     const norm=normalizeTime(s.time);
     const [hh,mm]=norm.split(':').map(Number);
-    if(hh<START_H||hh>=END_H) return'';
-    const dur=parseInt(s.duration||'60');
+    if(isNaN(hh)||hh<START_H||hh>=END_H) return;
+    const dur=parseInt(s.duration||'60')||60;
+    const st=hh*60+(mm||0);
+    evs.push({s,dayIdx,norm,dur,st,en:st+dur});
+  });
+  // 依星期分組，找出互相重疊的群組
+  DAYS.forEach((_,di)=>{
+    const list=evs.filter(e=>e.dayIdx===di).sort((a,b)=>a.st-b.st||a.en-b.en);
+    let group=[],groupEnd=-1;
+    const flush=()=>{group.forEach((e,k)=>{e.k=k;e.n=group.length;});group=[];};
+    list.forEach(e=>{
+      if(group.length&&e.st>=groupEnd){flush();groupEnd=-1;}
+      group.push(e);groupEnd=Math.max(groupEnd,e.en);
+    });
+    flush();
+  });
+
+  const COL=`((100% - 36px) / 7)`;
+  const studentBlocks=evs.map(e=>{
+    const {s,dayIdx,norm,dur,k,n}=e;
     const rc=roomOf(s.room);
-    const topPx=(hh-START_H)*ROW_H+(mm===30?HALF_H:0);
-    const heightPx=dur===30?HALF_H:dur===90?ROW_H*1.5:ROW_H;
-    // 計算left/width（7欄等寬，從第1欄開始）
-    const colW=`calc((100% - 36px) / 7)`;
-    const leftPx=`calc(36px + ${dayIdx} * (100% - 36px) / 7 + 2px)`;
-    return`<div onclick="openDetail('${s.id}','schedule')" style="
+    const topPx=(e.st-START_H*60)/60*ROW_H;
+    const heightPx=Math.max(dur/60*ROW_H,HALF_H*0.8);
+    // 錯開距離：所有卡片總共往右錯開欄寬的 45%
+    const step=n>1?`(${COL} * 0.45 / ${n-1})`:'0px';
+    const left=`calc(36px + ${dayIdx} * ${COL} + 2px + ${k} * ${step})`;
+    const width=`calc(${COL} - 4px - ${n-1} * ${step})`;
+    const layered=k>0;
+    const bg=layered
+      ?`linear-gradient(90deg, ${rc.color}10 0px, ${rc.color}55 14px), linear-gradient(90deg, rgba(10,15,10,0.15) 0px, var(--card) 10px)`
+      :(n>1?`linear-gradient(90deg, ${rc.color}55, ${rc.color}25), var(--card)`:`${rc.color}30`);
+    return`<div onclick="openDetail('${s.id}','schedule')" title="${s.name} ${norm}" style="
       position:absolute;
       top:${topPx}px;
-      left:${leftPx};
-      width:calc((100% - 36px) / 7 - 4px);
+      left:${left};
+      width:${width};
       height:${heightPx-2}px;
-      background:${rc.color}30;
+      background:${bg};
       border-left:3px solid ${rc.color};
       border-radius:5px;
       padding:3px 5px;
       cursor:pointer;
       overflow:hidden;
-      z-index:2;
+      z-index:${2+k};
       box-sizing:border-box;
+      ${layered?'box-shadow:-3px 0 6px rgba(0,0,0,0.45);':''}
     ">
-      <div style="font-size:11px;font-weight:700;color:${rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;">${s.name}</div>
-      ${heightPx>30?`<div style="font-size:9px;color:var(--text3);line-height:1.2;">${norm}${dur!==60?` ${dur}分`:''}</div>`:''}
+      <div style="font-size:11px;font-weight:700;color:${layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;">${s.name}</div>
+      ${heightPx>30?`<div style="font-size:9px;color:var(--text3);line-height:1.2;white-space:nowrap;overflow:hidden;">${norm}${dur!==60?` ${dur}分`:''}</div>`:''}
     </div>`;
   }).join('');
 
@@ -747,7 +772,8 @@ function renderDetail(id){
           <div class="dh-name">${s.name}</div>
           <div class="dh-tags">
             <span class="dh-tag ${rc.tag}">${rc.icon} ${s.room}</span>
-            <span class="dh-tag" style="background:var(--card2);color:var(--text2);">${s.day} ${s.time||''}${s.duration&&s.duration!=='60'?' · '+s.duration+'分':''}</span>
+            <span class="dh-tag" style="background:var(--card2);color:var(--text2);">${s.day||'—'}</span>
+            <span class="dh-tag" style="background:var(--card2);color:var(--text2);">🕐 ${s.time||'未設定'}${s.duration&&s.duration!=='60'?' · '+s.duration+'分':''}</span>
             <span class="dh-tag ${statusTag(s.status)}">${s.status}</span>
           </div>
         </div>
