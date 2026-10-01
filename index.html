@@ -767,7 +767,7 @@ async function loadUpcoming(sid){
     const owed=Math.max(0,leaves.length-makeups.length);
     if(statBox) statBox.textContent=s&&!isBooking(s)?`請假 ${leaves.length}・已補 ${makeups.length}・待補 ${owed}`:'Google 日曆';
     const now=Date.now();
-    const up=all.filter(e=>new Date(e.end.dateTime).getTime()>=now).slice(0,6);
+    const up=all.filter(e=>new Date(e.end.dateTime).getTime()>=now).slice(0,5);
     box.innerHTML=up.length===0?`<div class="rec-empty" style="padding:18px;">目前沒有排定的課程</div>`:up.map(lessonRow).join('');
     if(recBox){
       const lr=[...leaves].reverse();
@@ -785,12 +785,18 @@ function lessonRow(ev){
   const dur=(new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000;
   const pr=ev.extendedProperties?.private||{};const st=evState(ev);
   const isB=pr.kind==='booking',isMk=pr.makeup==='1';
-  const label=st==='leave'?'🚫 請假':st==='teacherOff'?'⛔ 老師停課':isMk?'補課':isB?'約課':'固定課';
+  let label=st==='leave'?'🚫 請假':st==='teacherOff'?'⛔ 老師停課':isMk?'補課':isB?'約課':'固定課';
+  if(pr.moved==='1'&&!st){
+    const o=ev.originalStartTime?.dateTime||pr.origStart;
+    label+=o?`・已調課（原 ${fmtMD(evParts(o).date).split(' ')[0]} ${evParts(o).hhmm}）`:'・已調課';
+  }
+  const mv=`<button onclick="openReschedule('${ev.id}')" style="${smallBtn('var(--text2)')}">調課</button>`;
   let btn='';
   if(st==='leave') btn=`<button onclick="restoreLeave('${ev.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;
   else if(st==='teacherOff') btn='';
-  else if(isB) btn=`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('var(--red)')}">${isMk?'取消補課':'取消約課'}</button>`;
-  else btn=`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('#c8a84a')}">請假</button>`;
+  else if(isB) btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('var(--red)')}">${isMk?'取消補課':'取消約課'}</button>`;
+  else btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('#c8a84a')}">請假</button>`;
+  btn=btn?`<div style="display:flex;gap:6px;flex-shrink:0;">${btn}</div>`:'';
   return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;${st?'opacity:0.6;':''}">
     <div style="flex:1;min-width:0;">
       <div style="font-size:14px;font-weight:700;color:var(--text);${st?'text-decoration:line-through;':''}">${fmtMD(p.date)}</div>
@@ -957,10 +963,25 @@ function reminderHtml(){
 }
 
 let bookingStudentId=null;
+let rescheduleEvId=null;
+function openReschedule(evId){
+  const ev=evCache[evId];if(!ev)return;
+  const sid=ev.extendedProperties?.private?.studentId;
+  bookingStudentId=sid;rescheduleEvId=evId;
+  const p=evParts(ev.start.dateTime);
+  const dur=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000)||60;
+  document.getElementById('book-title').textContent=`🔁 ${evName(ev)}｜調課（原 ${fmtMD(p.date)} ${p.hhmm}）`;
+  document.getElementById('book-date').value=p.date;
+  document.getElementById('book-time').value=p.hhmm;
+  document.getElementById('book-duration').value=String(dur);
+  document.getElementById('save-book-btn').textContent='✅ 確定調課';
+  document.getElementById('sheet-booking').classList.add('show');
+}
 function openBooking(sid){
   if(!gcalValid()){showToast('請先連接 Google 日曆');gcalConnect();return;}
   const s=students.find(x=>x.id===sid);if(!s)return;
-  bookingStudentId=sid;
+  bookingStudentId=sid;rescheduleEvId=null;
+  document.getElementById('save-book-btn').textContent='✅ 建立';
   document.getElementById('book-title').textContent=`📅 ${s.name}｜${isBooking(s)?'新增約課':'新增補課'}`;
   document.getElementById('book-date').value=nextDateFor(s.day);
   document.getElementById('book-time').value=s.time?pad5(s.time):'19:00';
@@ -972,15 +993,25 @@ async function saveBooking(){
   const ds=document.getElementById('book-date').value,tm=document.getElementById('book-time').value;
   const dur=parseInt(document.getElementById('book-duration').value)||60;
   if(!ds||!tm){showToast('請選擇日期與時間');return;}
-  const btn=document.getElementById('save-book-btn');btn.disabled=true;btn.textContent='建立中…';
+  const btn=document.getElementById('save-book-btn');btn.disabled=true;btn.textContent=rescheduleEvId?'調課中…':'建立中…';
   try{
-    if(await isTeacherOnLeave(ds)){showToast(`❌ ${fmtMD(ds)} 你已請假，不能排課`);btn.disabled=false;btn.textContent='✅ 建立';return;}
+    if(await isTeacherOnLeave(ds)){showToast(`❌ ${fmtMD(ds)} 你已請假，不能排課`);btn.disabled=false;btn.textContent=rescheduleEvId?'✅ 確定調課':'✅ 建立';return;}
+    if(rescheduleEvId){
+      const ev=evCache[rescheduleEvId];
+      const start=twISO(ds,tm);
+      const pr={...(ev.extendedProperties?.private||{}),moved:'1'};
+      if(!ev.originalStartTime&&!pr.origStart) pr.origStart=ev.start.dateTime;
+      await gcal('PATCH',`/events/${ev.id}`,{start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'},extendedProperties:{private:pr}});
+      weekKey=null;todayKey=null;rescheduleEvId=null;closeSheet('sheet-booking');
+      showToast(`✅ 已調到 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);
+      btn.disabled=false;btn.textContent='✅ 建立';return;
+    }
     const body=evBody(s,ds,tm,dur,'booking');
     if(!isBooking(s)){body.extendedProperties.private.makeup='1';body.description='補課（爵士鼓教學系統）';}
     await gcal('POST','/events',body);
     weekKey=null;todayKey=null;closeSheet('sheet-booking');showToast(`✅ 已約 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);
   }catch(e){showToast('❌ '+e.message);}
-  btn.disabled=false;btn.textContent='✅ 建立';
+  btn.disabled=false;btn.textContent=rescheduleEvId?'✅ 確定調課':'✅ 建立';
 }
 // ── 老師請假（期間內的課全部取消，可一鍵恢復）──
 let weekLeaves=[];
