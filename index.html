@@ -571,7 +571,7 @@ async function gcal(method,path,body,query){
   const r=await fetch(url,opts);
   if(r.status===401){gcalClear();onGcalChange();throw new Error('Google 授權已過期，請重新連接');}
   if(r.status===204||r.status===410) return null;
-  if(!r.ok){let m=r.status;try{m=(await r.json()).error.message;}catch(e){}throw new Error('Google 日曆錯誤：'+m);}
+  if(!r.ok){let m=r.status;try{m=(await r.json()).error.message;}catch(e){}throw new Error('Google 日曆錯誤：'+(r.status===409?'409 already exists':m));}
   return r.json();
 }
 
@@ -639,9 +639,16 @@ async function syncStudent(s){
     if(keep.summary!==`🥁 ${s.name}`||(keep.location||'')!==(s.room||''))
       await gcal('PATCH',`/events/${keep.id}`,{summary:`🥁 ${s.name}`,location:s.room||''});
   }else if(wantsWeekly(s)){
-    const b=evBody(s,nextDateFor(s.day),s.time,dur,'weekly');
+    const ds=nextDateFor(s.day);
+    const b=evBody(s,ds,s.time,dur,'weekly');
     b.recurrence=['RRULE:FREQ=WEEKLY'];
-    await gcal('POST','/events',b);
+    // 用學生+時段+建立日期組成固定 ID，避免同時執行兩次同步時重複建立
+    b.id=('c'+s.id.replace(/-/g,'')+pad5(s.time).replace(':','')+dur+twToday().replace(/-/g,'')).toLowerCase();
+    try{ await gcal('POST','/events',b); }
+    catch(e){
+      if(!/already exists|409|duplicate/i.test(e.message)) throw e;
+      await gcal('PUT',`/events/${b.id}`,{...b,status:'confirmed'}); // 已存在（或曾被刪除）→ 覆寫恢復
+    }
   }
   // 改名時同步未來約課的名稱
   const books=await listByStudent(s.id,'booking',[['timeMin',new Date().toISOString()]]);
@@ -653,8 +660,11 @@ async function removeStudentFromCal(sid){
   for(const ev of await activeSeries(sid)) await endSeries(ev);
   for(const ev of await listByStudent(sid,'booking',[['timeMin',new Date().toISOString()]])) await gcal('DELETE',`/events/${ev.id}`);
 }
+let syncBusy=false;
 async function syncAll(){
   if(!gcalValid()){gcalConnect();return;}
+  if(syncBusy){showToast('同步進行中，請稍候');return;}
+  syncBusy=true;
   const btn=document.getElementById('sync-all-btn');
   if(btn){btn.disabled=true;}
   let ok=0,fail=0;
@@ -662,7 +672,7 @@ async function syncAll(){
     if(btn) btn.textContent=`同步中… ${i+1}/${students.length}`;
     try{await syncStudent(students[i]);ok++;}catch(e){fail++;console.error('sync',students[i].name,e);}
   }
-  weekKey=null;
+  syncBusy=false;weekKey=null;
   showToast(fail?`⚠️ 完成 ${ok} 位，${fail} 位失敗`:`✅ 已同步 ${ok} 位學生到日曆`);
   await loadWeek();renderHome();
 }
@@ -744,7 +754,7 @@ function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin:0 0 14px;';
   const b='border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
   if(!gcalValid()) return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆未連接</div><button style="${b}background:var(--accent);color:#0a0f0a;" onclick="gcalConnect()">連接</button></div>`;
-  return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆已連接</div><button id="sync-all-btn" style="${b}background:var(--card2);color:var(--text);border:1px solid var(--border2);" onclick="syncAll()">全部同步到日曆</button></div>`;
+  return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆已連接</div><button id="sync-all-btn" style="${b}background:var(--card2);color:var(--text);border:1px solid var(--border2);" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'全部同步到日曆'}</button></div>`;
 }
 
 function roomOf(n){return CLASSROOMS.find(c=>c.name===n)||CLASSROOMS[0];}
@@ -898,8 +908,11 @@ function renderSchedule(){
   // 畫學生格子（同時段重疊 → 同一格內往右錯開、漸層疊放）
   const evs=[];
   if(calReady){
+    const seen=new Set();
     weekEvents.forEach(ev=>{
       const p=evParts(ev.start.dateTime);
+      const key=(ev.extendedProperties?.private?.studentId||ev.summary)+'|'+ev.start.dateTime;
+      if(seen.has(key)) return; seen.add(key);
       const dur=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000)||60;
       if(p.min<START_H*60||p.min>=END_H*60) return;
       const sid=ev.extendedProperties?.private?.studentId;
