@@ -963,7 +963,7 @@ function todoData(){
   return{td,yd,items,miss:items.filter(x=>x.ended&&!x.rec)};
 }
 function unrecHtml(){
-  const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;display:flex;align-items:center;gap:10px;';
+  const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;display:flex;align-items:center;gap:10px;';
   if(!gcalValid()) return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text3);">📝 連接 Google 日曆後，會在這裡提醒未紀錄的課</div><button style="${smallBtn('var(--accent)')}" onclick="gcalConnect()">連接</button></div>`;
   if(!todayEvents||todayKey!==twToday()) return`<div style="${box}font-size:13px;color:var(--text3);">📝 讀取課程中…</div>`;
   const {td,items,miss}=todoData();
@@ -974,7 +974,7 @@ function unrecHtml(){
   else if(todayEnded.length===0) msg=`📝 今天有 ${todayAll.length} 堂課，上完後會提醒你記錄`;
   else{msg=`✅ 今天上完的 ${todayEnded.length} 堂都記錄好了${todayEnded.length<todayAll.length?`・還有 ${todayAll.length-todayEnded.length} 堂未上`:''}`;color='var(--accent)';}
   return`<div style="${box}${hot?'border-color:rgba(200,168,74,0.5);':''}${items.length?'cursor:pointer;':''}" ${items.length?`onclick="showPage('todo')"`:''}>
-    <div style="flex:1;font-size:13px;font-weight:${hot?700:400};color:${color};">${msg}</div>${items.length?'<div style="color:var(--text3);font-size:18px;">›</div>':''}</div>`;
+    <div style="flex:1;min-width:0;font-size:13px;font-weight:${hot?700:400};color:${color};line-height:1.4;">${msg}</div>${items.length?'<div style="color:var(--text3);font-size:18px;">›</div>':''}</div>`;
 }
 // 待寫紀錄頁：昨天＋今天的課，已紀錄的顯示灰色
 function renderTodo(){
@@ -1410,9 +1410,9 @@ async function execCommand(){
 }
 function cmdBoxHtml(){
   if(!gcalValid()) return '';
-  return`<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;">
+  return`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;">
     <div style="display:flex;gap:8px;">
-      <input id="cmd-input" class="form-input" style="flex:1;margin:0;" placeholder="例：小明 10/31 請假" onkeydown="if(event.key==='Enter'&&!event.isComposing)runCommand()">
+      <input id="cmd-input" class="form-input" style="flex:1;min-width:0;margin:0;padding:8px 10px;font-size:14px;" placeholder="例：小明 10/31 請假" onkeydown="if(event.key==='Enter'&&!event.isComposing)runCommand()">
       <button class="add-rec-btn" onclick="runCommand()">送出</button>
     </div>
     <div id="cmd-result"></div>
@@ -1424,8 +1424,8 @@ function cmdBoxHtml(){
 }
 
 function gcalPanelHtml(){
-  const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;';
-  const b='border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
+  const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
+  const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
   if(!gcalValid()) return`<div style="${box}display:flex;align-items:center;gap:10px;"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆未連接</div><button style="${b}background:var(--accent);color:#0a0f0a;" onclick="gcalConnect()">連接</button></div>`;
   return`<div style="${box}">
     <div style="display:flex;align-items:center;gap:8px;">
