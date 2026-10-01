@@ -469,6 +469,55 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
   </div>
 </div>
 
+<!-- SUB NEW SHEET -->
+<div class="overlay" id="sheet-sub-new">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">🔁 新增代課</div>
+    <div class="sheet-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">日期</label><input class="form-input" type="date" id="sub-date"></div>
+        <div class="form-group"><label class="form-label">時間</label><input class="form-input" type="time" id="sub-time" step="900"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">學生</label><input class="form-input" id="sub-student" placeholder="學生名字"></div>
+        <div class="form-group"><label class="form-label">時長</label><select class="form-select" id="sub-duration"><option value="30">30 分鐘</option><option value="45">45 分鐘</option><option value="60" selected>60 分鐘</option><option value="90">90 分鐘</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">幫哪位老師代</label><input class="form-input" id="sub-teacher" placeholder="例：王老師"></div>
+        <div class="form-group"><label class="form-label">地點</label><input class="form-input" id="sub-room" placeholder="例：楊梅宏音" list="room-list"></div>
+      </div>
+      <datalist id="room-list"><option value="楊梅宏音 Yamaha"><option value="林口星玥"><option value="內壢奧莉琪"><option value="藝文鹿納"></datalist>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-sub-new')">取消</button>
+      <button class="btn-save" id="save-sub-btn" onclick="saveSubNew()">✅ 建立</button>
+    </div>
+  </div>
+</div>
+
+<!-- SUB RECORD SHEET -->
+<div class="overlay" id="sheet-sub-rec">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="subrec-title">🔁 代課</div>
+    <div class="sheet-body">
+      <div id="subrec-info" style="font-size:12px;color:var(--text3);margin:-6px 0 12px;"></div>
+      <div class="form-group"><label class="form-label">上課內容</label><textarea class="form-textarea" id="subrec-content" placeholder="練習內容、曲目…"></textarea></div>
+      <div class="form-group"><label class="form-label">上課狀況</label><textarea class="form-textarea" id="subrec-status" placeholder="今天表現…"></textarea></div>
+      <div class="form-group"><label class="form-label">其他事項</label><input class="form-input" id="subrec-note" placeholder="要轉告原老師的事…"></div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="copySubRecord()" class="btn-cancel" style="flex:1;">📋 複製給原老師</button>
+        <button onclick="deleteSub()" class="btn-cancel" style="flex:1;color:var(--red);">刪除代課</button>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-sub-rec')">關閉</button>
+      <button class="btn-save" onclick="saveSubRecord()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -997,7 +1046,7 @@ async function loadToday(){
   const td=twToday();if(todayKey===td&&todayEvents)return;
   try{
     const d=await gcal('GET','/events',null,[['timeMin',twISO(addDays(td,-1),'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','200']]);
-    todayEvents=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&e.extendedProperties?.private?.studentId);
+    todayEvents=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&(e.extendedProperties?.private?.studentId||isSub(e)));
     todayKey=td;
   }catch(e){todayEvents=null;}
 }
@@ -1006,23 +1055,9 @@ function todoData(){
   const td=twToday(),yd=addDays(td,-1),now=Date.now();
   const lessons=(todayEvents||[]).filter(e=>!evState(e));
   const dateOf=e=>evParts(e.start.dateTime).date;
-  const recOf=e=>records.find(r=>r.studentId===e.extendedProperties.private.studentId&&r.date===dateOf(e));
+  const recOf=e=>isSub(e)?(e.extendedProperties.private.content?{sub:true}:null):records.find(r=>r.studentId===e.extendedProperties.private.studentId&&r.date===dateOf(e));
   const items=lessons.map(e=>({e,date:dateOf(e),p:evParts(e.start.dateTime),ended:new Date(e.end.dateTime).getTime()<=now,rec:recOf(e)}));
   return{td,yd,items,miss:items.filter(x=>x.ended&&!x.rec)};
-}
-function unrecHtml(){
-  const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;display:flex;align-items:center;gap:10px;';
-  if(!gcalValid()) return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text3);">📝 連接 Google 日曆後，會在這裡提醒未紀錄的課</div><button style="${smallBtn('var(--accent)')}" onclick="gcalConnect()">連接</button></div>`;
-  if(!todayEvents||todayKey!==twToday()) return`<div style="${box}font-size:13px;color:var(--text3);">📝 讀取課程中…</div>`;
-  const {td,items,miss}=todoData();
-  const todayAll=items.filter(x=>x.date===td),todayEnded=todayAll.filter(x=>x.ended);
-  let msg,color='var(--text3)',hot=false;
-  if(miss.length){msg=`📝 還有 ${miss.length} 堂課未紀錄`;color='#c8a84a';hot=true;}
-  else if(todayAll.length===0) msg=items.length?'✅ 昨天的課都記錄好了・今天沒有課':'📝 今天沒有課';
-  else if(todayEnded.length===0) msg=`📝 今天有 ${todayAll.length} 堂課，上完後會提醒你記錄`;
-  else{msg=`✅ 今天上完的 ${todayEnded.length} 堂都記錄好了${todayEnded.length<todayAll.length?`・還有 ${todayAll.length-todayEnded.length} 堂未上`:''}`;color='var(--accent)';}
-  return`<div style="${box}${hot?'border-color:rgba(200,168,74,0.5);':''}${items.length?'cursor:pointer;':''}" ${items.length?`onclick="showPage('todo')"`:''}>
-    <div style="flex:1;min-width:0;font-size:13px;font-weight:${hot?700:400};color:${color};line-height:1.4;">${msg}</div>${items.length?'<div style="color:var(--text3);font-size:18px;">›</div>':''}</div>`;
 }
 // 待寫紀錄頁：昨天＋今天的課，已紀錄的顯示灰色
 function renderTodo(){
@@ -1038,10 +1073,10 @@ function renderTodo(){
         const sid=x.e.extendedProperties.private.studentId;const s=students.find(y=>y.id===sid);
         const done=!!x.rec;
         const tag=done?`<span style="color:var(--accent);font-weight:700;">✅ 已記錄</span>`:x.ended?`<span style="color:#c8a84a;font-weight:700;">待紀錄</span>`:`<span style="color:var(--text3);">尚未上課</span>`;
-        const click=done?`editRecord('${x.rec.id}')`:`recordLesson('${sid}','${x.p.hhmm}','${x.date}')`;
+        const click=isSub(x.e)?`openSubRecord('${x.e.id}')`:done?`editRecord('${x.rec.id}')`:`recordLesson('${sid}','${x.p.hhmm}','${x.date}')`;
         return`<div class="student-row" onclick="${click}" style="margin-bottom:8px;${done?'opacity:0.45;filter:grayscale(1);':''}${!done&&x.ended?'border-color:rgba(200,168,74,0.5);':''}">
           <div class="s-avatar">${s?avatarHtml(s,44):''}</div>
-          <div class="s-info"><div class="s-name">${evName(x.e)}</div><div class="s-meta">${(s?s.room:x.e.location||'').replace(' Yamaha','')} · ${x.p.hhmm}</div></div>
+          <div class="s-info"><div class="s-name">${isSub(x.e)?'🔁 '+esc(x.e.extendedProperties.private.subStudent||'')+'（代課）':evName(x.e)}</div><div class="s-meta">${(s?s.room:x.e.location||'').replace(' Yamaha','')} · ${x.p.hhmm}</div></div>
           <div class="s-right" style="font-size:12px;">${tag}</div>
         </div>`;}).join('')}`;
   };
@@ -1504,7 +1539,7 @@ async function buildExport(){
     const d=await gcal('GET','/events',null,[['timeMin',twISO(addDays(ds,-14),'00:00')],['timeMax',twISO(addDays(chEnd,14),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]);
     if(seq!==exportSeq) return;
     const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
-    const lessons=items.filter(e=>e.start?.dateTime&&e.extendedProperties?.private?.studentId);
+    const lessons=items.filter(e=>e.start?.dateTime&&(e.extendedProperties?.private?.studentId||isSub(e)));
     const tLeaves=items.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start?.date);
     const out=[];
     for(let i=0;i<days;i++){
@@ -1513,7 +1548,7 @@ async function buildExport(){
       out.push(`${mdShort(day)} ${wd}`);
       const all=lessons.filter(e=>evParts(e.start.dateTime).date===day)
         .map(e=>{const p=evParts(e.start.dateTime);const dur=Math.round((new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000);
-          return{st:p.min,en:p.min+dur,name:shortName(evName(e)),moved:e.extendedProperties.private.moved==='1',empty:!!evState(e)};})
+          return{st:p.min,en:p.min+dur,name:isSub(e)?'代'+(e.extendedProperties.private.subStudent||''):shortName(evName(e)),moved:e.extendedProperties.private.moved==='1',empty:!!evState(e)};})
         .sort((a,b)=>a.st-b.st||a.en-b.en);
       // 請假、停課的時段顯示成空白；若已被別人的課佔用就不列
       const act=all.filter(x=>!x.empty||!all.some(y=>!y.empty&&y.st<x.en&&y.en>x.st));
@@ -1597,6 +1632,144 @@ async function copyExport(){
   }
 }
 
+// ══════════ 代課 ══════════
+function isSub(e){return e?.extendedProperties?.private?.kind==='sub';}
+function openSubNew(){
+  if(!gcalValid()){showToast('請先連接 Google 日曆');gcalConnect();return;}
+  document.getElementById('sub-date').value=twToday();
+  document.getElementById('sub-time').value='14:00';
+  document.getElementById('sub-duration').value='60';
+  document.getElementById('sub-teacher').value='';
+  document.getElementById('sub-student').value='';
+  document.getElementById('sub-room').value='';
+  document.getElementById('sheet-sub-new').classList.add('show');
+}
+async function saveSubNew(){
+  const ds=document.getElementById('sub-date').value,tm=document.getElementById('sub-time').value;
+  const dur=parseInt(document.getElementById('sub-duration').value)||60;
+  const teacher=document.getElementById('sub-teacher').value.trim();
+  const stu=document.getElementById('sub-student').value.trim();
+  const room=document.getElementById('sub-room').value.trim();
+  if(!ds||!tm||!stu){showToast('請填日期、時間和學生');return;}
+  const btn=document.getElementById('save-sub-btn');btn.disabled=true;btn.textContent='建立中…';
+  try{
+    if(await isTeacherOnLeave(ds)) throw new Error(`${fmtMD(ds)} 你已請假`);
+    const start=twISO(ds,tm);
+    await gcal('POST','/events',{
+      summary:`🔁 代課｜${stu}${teacher?'（'+teacher+'）':''}`,location:room,
+      description:'代課（爵士鼓教學系統）',
+      start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'},
+      colorId:'5',
+      extendedProperties:{private:{kind:'sub',subStudent:stu.slice(0,100),subTeacher:teacher.slice(0,100),room:room.slice(0,100)}},
+    });
+    weekKey=null;todayKey=null;closeSheet('sheet-sub-new');showToast(`✅ 已建立代課 ${fmtMD(ds)} ${tm}`);
+    await loadToday();if(curPage==='home')renderHome();if(curPage==='schedule')renderSchedule();
+  }catch(e){showToast('❌ '+e.message);}
+  btn.disabled=false;btn.textContent='✅ 建立';
+}
+let subEv=null;
+async function openSubRecord(evId){
+  try{
+    subEv=await gcal('GET',`/events/${evId}`);
+    const pr=subEv.extendedProperties?.private||{};const p=evParts(subEv.start.dateTime);
+    const dur=Math.round((new Date(subEv.end.dateTime)-new Date(subEv.start.dateTime))/60000);
+    document.getElementById('subrec-title').textContent=`🔁 代課｜${pr.subStudent||''}`;
+    document.getElementById('subrec-info').textContent=`${fmtMD(p.date)} ${p.hhmm}・${dur} 分${pr.subTeacher?'・代 '+pr.subTeacher:''}${pr.room?'・'+pr.room:''}`;
+    document.getElementById('subrec-content').value=pr.content||'';
+    document.getElementById('subrec-status').value=pr.status||'';
+    document.getElementById('subrec-note').value=pr.note||'';
+    document.getElementById('sheet-sub-rec').classList.add('show');
+  }catch(e){showToast('❌ '+e.message);}
+}
+async function saveSubRecord(){
+  if(!subEv)return;
+  const content=document.getElementById('subrec-content').value.trim().slice(0,1000);
+  const status=document.getElementById('subrec-status').value.trim().slice(0,1000);
+  const note=document.getElementById('subrec-note').value.trim().slice(0,1000);
+  const pr={...(subEv.extendedProperties?.private||{}),content,status,note};
+  const desc=['代課（爵士鼓教學系統）',content&&'上課內容：'+content,status&&'上課狀況：'+status,note&&'其他事項：'+note].filter(Boolean).join('\n');
+  try{
+    await gcal('PATCH',`/events/${subEv.id}`,{description:desc,extendedProperties:{private:pr}});
+    closeSheet('sheet-sub-rec');showToast('✅ 代課紀錄已儲存');todayKey=null;
+    await loadToday();if(curPage==='home')renderHome();if(curPage==='todo')renderTodo();
+  }catch(e){showToast('❌ '+e.message);}
+}
+function copySubRecord(){
+  const pr=subEv?.extendedProperties?.private||{};const p=evParts(subEv.start.dateTime);
+  const [y,m,d]=p.date.split('-');
+  const c=document.getElementById('subrec-content').value.trim(),st=document.getElementById('subrec-status').value.trim(),n=document.getElementById('subrec-note').value.trim();
+  const t=[`${y}/${parseInt(m)}/${parseInt(d)} ${pr.subStudent||''}（代課）`,c,st&&'狀況：'+st,n&&'其他：'+n].filter(Boolean).join('\n');
+  navigator.clipboard?.writeText(t).then(()=>showToast('✅ 已複製，可貼給原老師'),()=>showToast('複製失敗'));
+}
+function deleteSub(){
+  if(!subEv)return;
+  showConfirm('刪除代課','這堂代課（和代課紀錄）會從日曆刪除。',async()=>{
+    try{await gcal('DELETE',`/events/${subEv.id}`);closeSheet('sheet-sub-rec');weekKey=null;todayKey=null;showToast('✅ 已刪除');
+      await loadToday();if(curPage==='home')renderHome();if(curPage==='schedule')renderSchedule();if(curPage==='todo')renderTodo();}
+    catch(e){showToast('❌ '+e.message);}
+  });
+}
+
+// ══════════ 首頁：今日課程（含上一堂紀錄）══════════
+let todayOpen=null;
+function lastRecordBefore(sid,ds){
+  return records.filter(r=>r.studentId===sid&&r.date&&r.date<ds).sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:(a.time||'')<(b.time||'')?1:-1)[0]||null;
+}
+function toggleToday(id){todayOpen=todayOpen===id?null:id;document.getElementById('unrec-card').innerHTML=unrecHtml();}
+function recordFromToday(sid,hhmm,ds,withLast){
+  openAddRecord(sid);
+  document.getElementById('rec-time').value=hhmm;document.getElementById('rec-date').value=ds;
+  if(withLast){const l=lastRecordBefore(sid,ds);if(l&&l.content)document.getElementById('rec-content').value=l.content;}
+}
+function esc(t){return String(t||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function unrecHtml(){
+  const wrapS='margin:0 16px 10px;';
+  const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
+  if(!gcalValid()) return`<div style="${box}display:flex;align-items:center;gap:10px;"><div style="flex:1;font-size:13px;color:var(--text3);">📝 連接 Google 日曆後，這裡會顯示今日課程</div><button style="${smallBtn('var(--accent)')}" onclick="gcalConnect()">連接</button></div>`;
+  if(!todayEvents||todayKey!==twToday()) return`<div style="${box}font-size:13px;color:var(--text3);">讀取今日課程中…</div>`;
+  const {td,yd,items}=todoData();
+  const ydMiss=items.filter(x=>x.date===yd&&x.ended&&!x.rec).length;
+  const all=todayEvents.filter(e=>evParts(e.start.dateTime).date===td&&!evState(e)).sort((a,b)=>a.start.dateTime<b.start.dateTime?-1:1);
+  const now=Date.now();
+  let html=`<div style="${wrapS}display:flex;align-items:baseline;justify-content:space-between;">
+    <div class="sec-line" style="margin:0;"><div class="section-title">今日課程</div><div class="rec-count">・${all.length} 堂</div></div></div>`;
+  if(ydMiss) html+=`<div style="${box}cursor:pointer;border-color:rgba(200,168,74,0.5);display:flex;align-items:center;" onclick="showPage('todo')"><div style="flex:1;font-size:13px;color:#c8a84a;font-weight:700;">📝 昨天還有 ${ydMiss} 堂未紀錄</div><div style="color:var(--text3);">›</div></div>`;
+  if(!all.length) return html+`<div style="${box}font-size:13px;color:var(--text3);">今天沒有課</div>`;
+  html+=`<div style="${box}padding:4px 12px;">`+all.map((e,i)=>{
+    const p=evParts(e.start.dateTime);const st=evState(e);const sub=isSub(e);const pr=e.extendedProperties?.private||{};
+    const sid=pr.studentId;const ended=new Date(e.end.dateTime).getTime()<=now;
+    const rec=sub?(pr.content?{}:null):records.find(r=>r.studentId===sid&&r.date===td);
+    const name=sub?`${pr.subStudent||''}`:evName(e);
+    const tag=st==='leave'?'<span style="color:var(--text3);">🚫 請假</span>':st==='teacherOff'?'<span style="color:var(--text3);">⛔ 停課</span>'
+      :rec?'<span style="color:var(--accent);">✅ 已記錄</span>':ended?'<span style="color:#c8a84a;font-weight:700;">待紀錄</span>':'<span style="color:var(--text3);">尚未上課</span>';
+    const last=!sub&&sid?lastRecordBefore(sid,td):null;
+    const sub2=sub?`代課${pr.subTeacher?'・'+esc(pr.subTeacher):''}${pr.room?'・'+esc(pr.room):''}`:last?`上次 ${mdShort(last.date)}：${esc((last.content||'（沒有內容）').split('\n')[0])}`:'還沒有上課紀錄';
+    const open=todayOpen===e.id&&!st;
+    let detail='';
+    if(open){
+      if(sub){
+        detail=`<div style="padding:4px 0 10px 50px;"><button class="add-rec-btn" onclick="event.stopPropagation();openSubRecord('${e.id}')">${rec?'查看代課紀錄':'＋ 寫代課紀錄'}</button></div>`;
+      }else{
+        const f=(l,v)=>v?`<div style="margin-bottom:6px;"><div style="font-size:10px;color:var(--text3);">${l}</div><div style="font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;">${esc(v)}</div></div>`:'';
+        detail=`<div style="padding:4px 0 10px 50px;" onclick="event.stopPropagation()">
+          ${last?`<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">上一堂 ${fmtMD(last.date)}${last.stars?' ⭐':''}</div>${f('上課內容',last.content)}${f('上課狀況',last.status)}${f('其他事項',last.note)}`:'<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">還沒有上課紀錄</div>'}
+          ${rec?`<button class="add-rec-btn" onclick="editRecord('${rec.id}')">查看今天的紀錄</button>`
+            :`<button class="add-rec-btn" onclick="recordFromToday('${sid}','${p.hhmm}','${td}',true)">＋ 新增紀錄${last&&last.content?'（帶入上次內容）':''}</button>`}
+        </div>`;
+      }
+    }
+    return`<div style="border-top:${i?'1px solid var(--border)':'none'};">
+      <div onclick="${st?'':`toggleToday('${e.id}')`}" style="display:flex;gap:10px;padding:9px 0;align-items:flex-start;${st?'opacity:0.5;':'cursor:pointer;'}">
+        <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${p.hhmm}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${esc(name)}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
+          <div style="font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">${sub2}</div>
+        </div>
+      </div>${detail}</div>`;
+  }).join('')+`</div>`;
+  return html;
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -1609,6 +1782,7 @@ function gcalPanelHtml(){
     <div style="display:flex;gap:8px;margin-top:10px;">
       <button style="${b}flex:1;background:var(--card2);color:#c8a84a;border:1px solid var(--border2);" onclick="openLeave()">🏖 我要請假</button>
       <button style="${b}flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border2);" onclick="showPage('leaves')">📋 請假紀錄</button>
+      <button style="${b}flex:1;background:var(--card2);color:#c8a84a;border:1px solid var(--border2);" onclick="openSubNew()">🔁 代課</button>
     </div>
     ${reminderHtml()}
   </div>`;
@@ -1796,7 +1970,8 @@ function renderSchedule(){
       const dur=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000)||60;
       if(p.min<START_H*60||p.min>=END_H*60) return;
       const sid=ev.extendedProperties?.private?.studentId;
-      const s=students.find(x=>x.id===sid)||{id:'',name:(ev.summary||'').replace('🥁 ',''),room:ev.location||''};
+      const pr0=ev.extendedProperties?.private||{};
+      const s=isSub(ev)?{id:'',subId:ev.id,name:'代 '+(pr0.subStudent||''),room:pr0.room||'',sub:true}:(students.find(x=>x.id===sid)||{id:'',name:(ev.summary||'').replace('🥁 ',''),room:ev.location||''});
       evs.push({s,dayIdx:(p.dow+6)%7,norm:p.hhmm,dur,st:p.min,en:p.min+dur,booking:ev.extendedProperties?.private?.kind==='booking',state:evState(ev)});
     });
   }else if(weekOffset===0&&!useCal){
@@ -1837,7 +2012,7 @@ function renderSchedule(){
   const studentBlocks=evs.map(e=>{
     const {s,dayIdx,norm,dur,k,n,booking,state}=e;
     const rc0=roomOf(s.room);
-    const rc=state?{...rc0,color:'#666666'}:rc0;
+    const rc=state?{...rc0,color:'#666666'}:s.sub?{...rc0,color:'#c8a84a'}:rc0;
     const topPx=(e.st-START_H*60)/60*ROW_H;
     const heightPx=Math.max(dur/60*ROW_H,HALF_H*0.8);
     // 錯開距離：所有卡片總共往右錯開欄寬的 45%
@@ -1848,7 +2023,7 @@ function renderSchedule(){
     const bg=layered
       ?`linear-gradient(90deg, ${rc.color}10 0px, ${rc.color}55 14px), linear-gradient(90deg, rgba(10,15,10,0.15) 0px, var(--card) 10px)`
       :(n>1?`linear-gradient(90deg, ${rc.color}55, ${rc.color}25), var(--card)`:`${rc.color}30`);
-    return`<div ${s.id?`onclick="openDetail('${s.id}','schedule')"`:''} title="${s.name} ${norm}${booking?' 約課':''}${state==='leave'?' 請假':state==='teacherOff'?' 老師停課':''}" style="
+    return`<div ${s.id?`onclick="openDetail('${s.id}','schedule')"`:s.subId?`onclick="openSubRecord('${s.subId}')"`:''} title="${s.name} ${norm}${booking?' 約課':''}${state==='leave'?' 請假':state==='teacherOff'?' 老師停課':''}" style="
       position:absolute;
       top:${topPx}px;
       left:${left};
