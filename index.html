@@ -249,6 +249,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div class="schedule-wrap" id="schedule-wrap"></div>
     </div>
     <div class="page" id="page-students">
+      <div style="padding:10px 16px 0;"><input id="stu-search" type="search" placeholder="🔍 搜尋學生" oninput="renderStudents()" autocomplete="off" style="width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:6px 10px;font-family:inherit;font-size:13px;color:var(--text);outline:none;"></div>
       <div class="filter-scroll" id="filter-scroll"></div>
       <div class="student-items" id="student-items"></div>
     </div>
@@ -260,15 +261,15 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div class="detail-wrap" id="detail-wrap"></div>
     </div>
     <div class="page" id="page-todo">
-      <button class="back-bar" onclick="showPage('home')">‹ 首頁</button>
+      <button class="back-bar" onclick="goBack('home')">‹ 首頁</button>
       <div style="padding:0 16px 24px;" id="todo-wrap"></div>
     </div>
     <div class="page" id="page-leaves">
-      <button class="back-bar" onclick="showPage('home')">‹ 首頁</button>
+      <button class="back-bar" onclick="goBack('home')">‹ 首頁</button>
       <div style="padding:0 16px 24px;" id="leaves-wrap"></div>
     </div>
     <div class="page" id="page-classroom">
-      <button class="back-bar" onclick="showPage('home')">‹ 首頁</button>
+      <button class="back-bar" onclick="goBack('home')">‹ 首頁</button>
       <div class="classroom-detail" id="classroom-detail"></div>
     </div>
   </div>
@@ -1624,7 +1625,11 @@ async function refreshAll(){
   }catch(e){showToast('❌ 更新失敗：'+e.message);}
   refreshing=false;
 }
+let navFromPop=false;
 function showPage(id){
+  if(!navFromPop&&id!==curPage){
+    try{history.pushState({page:id,sid:id==='detail'?curStudent:null,from:detailFrom},'');}catch(e){}
+  }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
@@ -1841,7 +1846,9 @@ function renderStudents(){
     `<div class="chip${stuFilter===f?' active':''}" onclick="setStuFilter('${f}')">${f}</div>`).join('');
 
   let list=students;
-  if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status!=='正常上課');
+  const q=cleanName(document.getElementById('stu-search')?.value||'');
+  if(q) list=students.filter(s=>cleanName(s.name).includes(q));
+  else if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status!=='正常上課');
   else if(stuFilter==='約課制') list=students.filter(s=>isBooking(s)&&s.status!=='不上課');
   else if(stuFilter!=='全部') list=students.filter(s=>s.room===stuFilter&&s.status==='正常上課');
   else list=students.filter(s=>s.status==='正常上課');
@@ -1872,10 +1879,47 @@ function renderStudents(){
 }
 function setStuFilter(f){stuFilter=f;renderStudents();}
 
+function goBack(fallback){
+  if(history.state&&history.state.page&&history.length>1) history.back();
+  else showPage(fallback||'home');
+}
+window.addEventListener('popstate',e=>{
+  // 先關掉開著的視窗
+  const open=[...document.querySelectorAll('.overlay.show')];
+  open.forEach(o=>o.classList.remove('show'));
+  closePopup();
+  const st=e.state||{page:'home'};
+  navFromPop=true;
+  try{
+    if(st.page==='detail'&&st.sid){curStudent=st.sid;detailFrom=st.from||'students';
+      document.getElementById('detail-back').onclick=()=>goBack(detailFrom);
+      document.getElementById('student-more-btn').onclick=(ev)=>showStudentMenu(ev,st.sid);
+      showPage('detail');renderDetail(st.sid);}
+    else showPage(st.page||'home');
+  }finally{navFromPop=false;}
+});
+try{history.replaceState({page:'home'},'');}catch(e){}
+// 加到主畫面（全螢幕 App）時沒有 Safari 的返回手勢 → 自己做：從左邊緣往右滑
+(function(){
+  const standalone=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
+  if(!standalone) return;
+  let sx=0,sy=0,on=false;
+  document.addEventListener('touchstart',e=>{
+    const t=e.touches[0];on=e.touches.length===1&&t.clientX<24;sx=t.clientX;sy=t.clientY;
+  },{passive:true});
+  document.addEventListener('touchend',e=>{
+    if(!on) return;on=false;
+    const t=e.changedTouches[0];const dx=t.clientX-sx,dy=Math.abs(t.clientY-sy);
+    if(dx>70&&dy<dx*0.6){
+      if(document.querySelector('.overlay.show')){document.querySelectorAll('.overlay.show').forEach(o=>o.classList.remove('show'));return;}
+      if(curPage!=='home') goBack('home');
+    }
+  },{passive:true});
+})();
 function openDetail(id,from){
   changeShowAll=false;
   curStudent=id;detailFrom=from;
-  document.getElementById('detail-back').onclick=()=>showPage(from==='classroom'?'classroom':from);
+  document.getElementById('detail-back').onclick=()=>goBack(from==='classroom'?'classroom':from);
   document.getElementById('student-more-btn').onclick=(e)=>showStudentMenu(e,id);
   showPage('detail');
   renderDetail(id);
