@@ -213,6 +213,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
 </style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 <div class="app">
@@ -235,6 +236,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         </div>
       </div>
       <div class="stat-row" id="stat-row"></div>
+      <div id="gcal-panel"></div>
       <div class="section-head"><div class="section-title">📍 教室</div></div>
       <div class="classroom-list" id="classroom-list"></div>
     </div>
@@ -348,6 +350,9 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
           </select>
         </div>
       </div>
+      <div class="form-group"><label class="form-label">排課方式</label>
+        <select class="form-select" id="stu-booking"><option>每週固定</option><option>約課制</option></select>
+      </div>
       <div class="form-group"><label class="form-label">狀態</label>
         <select class="form-select" id="stu-status"><option>正常上課</option><option>暫停上課</option><option>不上課</option></select>
       </div>
@@ -356,6 +361,27 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     <div class="sheet-footer">
       <button class="btn-cancel" onclick="closeSheet('sheet-student')">取消</button>
       <button class="btn-save" id="save-stu-btn" onclick="saveStudent()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- BOOKING SHEET -->
+<div class="overlay" id="sheet-booking">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="book-title">📅 新增約課</div>
+    <div class="sheet-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">日期</label><input class="form-input" type="date" id="book-date"></div>
+        <div class="form-group"><label class="form-label">時間</label><input class="form-input" type="time" id="book-time" step="900"></div>
+      </div>
+      <div class="form-group"><label class="form-label">上課時長</label>
+        <select class="form-select" id="book-duration"><option value="30">30 分鐘</option><option value="60">60 分鐘</option><option value="90">90 分鐘</option></select>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-booking')">取消</button>
+      <button class="btn-save" id="save-book-btn" onclick="saveBooking()">✅ 建立</button>
     </div>
   </div>
 </div>
@@ -421,8 +447,10 @@ function gp(page,name,type){
   return '';
 }
 
+let HAS_BOOKING_FIELD=false;
 async function loadStudents(){
   const pages=await queryDB(DB_STUDENTS,null,[{property:'學生',direction:'ascending'}]);
+  HAS_BOOKING_FIELD=pages.some(p=>p.properties&&('排課方式' in p.properties));
   students=pages.map((p,i)=>({
     id:p.id,
     name:gp(p,'學生','title'),
@@ -431,6 +459,7 @@ async function loadStudents(){
     time:normalizeTime(gp(p,'上課時間','rich_text')),
     duration:gp(p,'上課時長','rich_text')||'60',
     status:gp(p,'狀態','select'),
+    booking:gp(p,'排課方式','select')||'每週固定',
     note:gp(p,'備註','rich_text'),
     photo:gp(p,'照片','files'),
     color:COLORS[i%COLORS.length],
@@ -483,6 +512,7 @@ async function updateStudent(id,data){
     '上課時長':{rich_text:[{text:{content:String(data.duration||'60')}}]},
     '狀態':{select:{name:data.status}},
     '備註':{rich_text:[{text:{content:String(data.note||'')}}]},
+    ...(HAS_BOOKING_FIELD?{'排課方式':{select:{name:data.booking||'每週固定'}}}:{}),
   }});
 }
 async function createStudent(data){
@@ -497,8 +527,224 @@ async function createStudent(data){
   extra['上課時長']={rich_text:[{text:{content:String(data.duration||'60')}}]};
   if(data.note) extra['備註']={rich_text:[{text:{content:String(data.note)}}]};
   if(data.status) extra['狀態']={select:{name:String(data.status)}};
+  if(HAS_BOOKING_FIELD) extra['排課方式']={select:{name:data.booking||'每週固定'}};
   await notionAPI('PATCH',`/pages/${result.id}`,{properties:extra});
   return result;
+}
+
+// ══════════ GOOGLE 日曆同步 ══════════
+const GCAL_CLIENT_ID='160495635456-s9dvuusgeq02fr5790juks8an05kn6na.apps.googleusercontent.com';
+const GCAL_ID='086e307427493cceee16d6e4db19f467c13bb1f4a8352c62b2787e881136c239@group.calendar.google.com';
+const GCAL_SCOPE='https://www.googleapis.com/auth/calendar.events';
+let gTokenClient=null,gToken=null,gExp=0;
+try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
+function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
+function gcalInit(){
+  if(!window.google||!google.accounts||!google.accounts.oauth2){setTimeout(gcalInit,300);return;}
+  gTokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:GCAL_CLIENT_ID,scope:GCAL_SCOPE,
+    callback:(resp)=>{
+      if(resp.error){showToast('❌ Google 登入失敗：'+resp.error);return;}
+      gToken=resp.access_token;gExp=Date.now()+(resp.expires_in||3600)*1000;
+      try{localStorage.setItem('gcal_token',JSON.stringify({t:gToken,e:gExp}));}catch(e){}
+      showToast('✅ 已連接 Google 日曆');
+      weekKey=null;onGcalChange();
+    }
+  });
+}
+function gcalConnect(){
+  if(!gTokenClient){showToast('Google 元件載入中，請稍候再按一次');return;}
+  gTokenClient.requestAccessToken({prompt:''});
+}
+function gcalClear(){gToken=null;gExp=0;try{localStorage.removeItem('gcal_token');}catch(e){}}
+function onGcalChange(){
+  if(curPage==='home') loadWeek().then(renderHome);
+  if(curPage==='schedule') renderSchedule();
+  if(curPage==='detail'&&curStudent) renderDetail(curStudent);
+}
+async function gcal(method,path,body,query){
+  if(!gcalValid()) throw new Error('Google 日曆未連接或已過期，請重新連接');
+  let url=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GCAL_ID)}${path}`;
+  if(query) url+='?'+new URLSearchParams(query).toString();
+  const opts={method,headers:{'Authorization':`Bearer ${gToken}`}};
+  if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
+  const r=await fetch(url,opts);
+  if(r.status===401){gcalClear();onGcalChange();throw new Error('Google 授權已過期，請重新連接');}
+  if(r.status===204||r.status===410) return null;
+  if(!r.ok){let m=r.status;try{m=(await r.json()).error.message;}catch(e){}throw new Error('Google 日曆錯誤：'+m);}
+  return r.json();
+}
+
+// ── 台灣時間工具（不受裝置時區影響）──
+const TW_MS=8*3600e3;
+function twNow(){return new Date(Date.now()+TW_MS);}
+function ymd(d){return d.toISOString().slice(0,10);}
+function twToday(){return ymd(twNow());}
+function addDays(ds,n){const d=new Date(ds+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return ymd(d);}
+function pad5(t){const n=normalizeTime(t);const[h,m]=n.split(':');return String(parseInt(h)||0).padStart(2,'0')+':'+String(parseInt(m)||0).padStart(2,'0');}
+function twISO(ds,hhmm){return `${ds}T${pad5(hhmm)}:00+08:00`;}
+function plusMin(iso,min){return new Date(new Date(iso).getTime()+min*60000+TW_MS).toISOString().slice(0,19)+'+08:00';}
+function evParts(iso){const d=new Date(new Date(iso).getTime()+TW_MS);return{date:ymd(d),min:d.getUTCHours()*60+d.getUTCMinutes(),dow:d.getUTCDay(),hhmm:d.toISOString().slice(11,16)};}
+function mondayOf(off){const n=twNow();return addDays(ymd(n),-((n.getUTCDay()+6)%7)+7*off);}
+function nextDateFor(day){const idx=DAYS.indexOf(day);if(idx<0)return twToday();const ti=(twNow().getUTCDay()+6)%7;return addDays(twToday(),(idx-ti+7)%7);}
+function fmtMD(ds){const d=new Date(ds+'T00:00:00Z');return `${d.getUTCMonth()+1}/${d.getUTCDate()} ${DAYS[(d.getUTCDay()+6)%7]}`;}
+function untilYesterday(){return new Date(new Date(twISO(twToday(),'00:00')).getTime()-1000).toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';}
+function isBooking(s){return s.booking==='約課制';}
+function wantsWeekly(s){return !isBooking(s)&&s.status==='正常上課'&&DAYS.includes(s.day)&&!!s.time;}
+
+function evBody(s,ds,hhmm,dur,kind){
+  const start=twISO(ds,hhmm);
+  return{
+    summary:`🥁 ${s.name}`,location:s.room||'',
+    description:kind==='booking'?'約課（爵士鼓教學系統）':'每週固定課（爵士鼓教學系統）',
+    start:{dateTime:start,timeZone:'Asia/Taipei'},
+    end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'},
+    extendedProperties:{private:{studentId:s.id,kind}},
+  };
+}
+async function listByStudent(sid,kind,extra){
+  const q=[['privateExtendedProperty',`studentId=${sid}`],['maxResults','100']];
+  if(kind) q.push(['privateExtendedProperty',`kind=${kind}`]);
+  (extra||[]).forEach(p=>q.push(p));
+  const d=await gcal('GET','/events',null,q);
+  return (d&&d.items||[]).filter(e=>e.status!=='cancelled');
+}
+function seriesActive(ev){
+  const rr=(ev.recurrence||[]).join(';');const m=rr.match(/UNTIL=(\d{8})/);
+  return !m||m[1]>=twToday().replace(/-/g,'');
+}
+async function activeSeries(sid){
+  return (await listByStudent(sid,'weekly')).filter(e=>e.recurrence&&seriesActive(e));
+}
+async function endSeries(ev){
+  const startDate=evParts(ev.start.dateTime).date;
+  if(startDate>=twToday()) return gcal('DELETE',`/events/${ev.id}`);
+  return gcal('PATCH',`/events/${ev.id}`,{recurrence:[`RRULE:FREQ=WEEKLY;UNTIL=${untilYesterday()}`]});
+}
+// 依 Notion 學生資料同步每週固定課
+async function syncStudent(s){
+  const list=await activeSeries(s.id);
+  const dur=parseInt(s.duration||'60')||60;
+  let keep=null;
+  if(wantsWeekly(s)){
+    const tDow=(DAYS.indexOf(s.day)+1)%7, tMin=timeToMin(pad5(s.time));
+    keep=list.find(ev=>{
+      const p=evParts(ev.start.dateTime);
+      const d=(new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000;
+      return p.dow===tDow&&p.min===tMin&&d===dur;
+    })||null;
+  }
+  for(const ev of list){ if(ev!==keep) await endSeries(ev); }
+  if(keep){
+    if(keep.summary!==`🥁 ${s.name}`||(keep.location||'')!==(s.room||''))
+      await gcal('PATCH',`/events/${keep.id}`,{summary:`🥁 ${s.name}`,location:s.room||''});
+  }else if(wantsWeekly(s)){
+    const b=evBody(s,nextDateFor(s.day),s.time,dur,'weekly');
+    b.recurrence=['RRULE:FREQ=WEEKLY'];
+    await gcal('POST','/events',b);
+  }
+  // 改名時同步未來約課的名稱
+  const books=await listByStudent(s.id,'booking',[['timeMin',new Date().toISOString()]]);
+  for(const ev of books){
+    if(ev.summary!==`🥁 ${s.name}`) await gcal('PATCH',`/events/${ev.id}`,{summary:`🥁 ${s.name}`,location:s.room||''});
+  }
+}
+async function removeStudentFromCal(sid){
+  for(const ev of await activeSeries(sid)) await endSeries(ev);
+  for(const ev of await listByStudent(sid,'booking',[['timeMin',new Date().toISOString()]])) await gcal('DELETE',`/events/${ev.id}`);
+}
+async function syncAll(){
+  if(!gcalValid()){gcalConnect();return;}
+  const btn=document.getElementById('sync-all-btn');
+  if(btn){btn.disabled=true;}
+  let ok=0,fail=0;
+  for(let i=0;i<students.length;i++){
+    if(btn) btn.textContent=`同步中… ${i+1}/${students.length}`;
+    try{await syncStudent(students[i]);ok++;}catch(e){fail++;console.error('sync',students[i].name,e);}
+  }
+  weekKey=null;
+  showToast(fail?`⚠️ 完成 ${ok} 位，${fail} 位失敗`:`✅ 已同步 ${ok} 位學生到日曆`);
+  await loadWeek();renderHome();
+}
+
+// ── 課表週資料 ──
+let weekOffset=0,weekEvents=null,weekKey=null,weekLoading=false;
+async function loadWeek(){
+  const mon=mondayOf(weekOffset);
+  if(!gcalValid()){weekEvents=null;weekKey=null;return;}
+  if(weekKey===mon&&weekEvents) return;
+  weekLoading=true;
+  try{
+    const d=await gcal('GET','/events',null,[['timeMin',twISO(mon,'00:00')],['timeMax',twISO(addDays(mon,7),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]);
+    weekEvents=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime);weekKey=mon;
+  }catch(e){weekEvents=null;weekKey=null;showToast('❌ '+e.message);}
+  weekLoading=false;
+}
+function shiftWeek(n){weekOffset=n===0?0:weekOffset+n;renderSchedule();}
+
+// ── 近期課程 / 請假 / 約課 ──
+async function loadUpcoming(sid){
+  const box=document.getElementById('upcoming-list');if(!box)return;
+  if(!gcalValid()){
+    box.innerHTML=`<div class="rec-empty" style="padding:18px;">連接 Google 日曆後，可在這裡查看近期課程、請假與約課<br><button class="add-rec-btn" style="margin-top:10px;" onclick="gcalConnect()">連接 Google 日曆</button></div>`;
+    return;
+  }
+  box.innerHTML=`<div class="rec-empty" style="padding:18px;">讀取中…</div>`;
+  try{
+    const d=await gcal('GET','/events',null,[['privateExtendedProperty',`studentId=${sid}`],['timeMin',new Date().toISOString()],['singleEvents','true'],['orderBy','startTime'],['maxResults','6']]);
+    const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime);
+    if(curStudent!==sid) return;
+    box.innerHTML=items.length===0?`<div class="rec-empty" style="padding:18px;">目前沒有排定的課程</div>`:
+      items.map(ev=>{
+        const p=evParts(ev.start.dateTime);
+        const dur=(new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000;
+        const kind=ev.extendedProperties?.private?.kind;
+        const isB=kind==='booking';
+        return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:700;color:var(--text);">${fmtMD(p.date)}</div>
+            <div style="font-size:11px;color:var(--text3);">${p.hhmm}${dur!==60?' · '+dur+'分':''} · ${isB?'約課':'固定課'}</div>
+          </div>
+          <button onclick="cancelLesson('${ev.id}','${p.date}',${isB})" style="background:transparent;border:1px solid var(--border2);color:${isB?'var(--red)':'#c8a84a'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">${isB?'取消約課':'請假'}</button>
+        </div>`;
+      }).join('');
+  }catch(e){box.innerHTML=`<div class="rec-empty" style="padding:18px;color:var(--red);">${e.message}</div>`;}
+}
+function cancelLesson(evId,ds,isB){
+  const s=students.find(x=>x.id===curStudent);
+  showConfirm(isB?'取消約課':'請假',`${s?s.name:''} ${fmtMD(ds)} 的課將從 Google 日曆移除${isB?'':'，之後的固定課不受影響'}。`,async()=>{
+    try{await gcal('DELETE',`/events/${evId}`);weekKey=null;showToast(isB?'✅ 已取消約課':'✅ 已登記請假');loadUpcoming(curStudent);}
+    catch(e){showToast('❌ '+e.message);}
+  },isB?'取消約課':'確定請假');
+}
+let bookingStudentId=null;
+function openBooking(sid){
+  if(!gcalValid()){showToast('請先連接 Google 日曆');gcalConnect();return;}
+  const s=students.find(x=>x.id===sid);if(!s)return;
+  bookingStudentId=sid;
+  document.getElementById('book-title').textContent=`📅 ${s.name}｜${isBooking(s)?'新增約課':'新增補課'}`;
+  document.getElementById('book-date').value=nextDateFor(s.day);
+  document.getElementById('book-time').value=s.time?pad5(s.time):'19:00';
+  document.getElementById('book-duration').value=String(parseInt(s.duration||'60')||60);
+  document.getElementById('sheet-booking').classList.add('show');
+}
+async function saveBooking(){
+  const s=students.find(x=>x.id===bookingStudentId);if(!s)return;
+  const ds=document.getElementById('book-date').value,tm=document.getElementById('book-time').value;
+  const dur=parseInt(document.getElementById('book-duration').value)||60;
+  if(!ds||!tm){showToast('請選擇日期與時間');return;}
+  const btn=document.getElementById('save-book-btn');btn.disabled=true;btn.textContent='建立中…';
+  try{
+    await gcal('POST','/events',evBody(s,ds,tm,dur,'booking'));
+    weekKey=null;closeSheet('sheet-booking');showToast(`✅ 已約 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);
+  }catch(e){showToast('❌ '+e.message);}
+  btn.disabled=false;btn.textContent='✅ 建立';
+}
+function gcalPanelHtml(){
+  const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin:0 0 14px;';
+  const b='border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
+  if(!gcalValid()) return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆未連接</div><button style="${b}background:var(--accent);color:#0a0f0a;" onclick="gcalConnect()">連接</button></div>`;
+  return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆已連接</div><button id="sync-all-btn" style="${b}background:var(--card2);color:var(--text);border:1px solid var(--border2);" onclick="syncAll()">全部同步到日曆</button></div>`;
 }
 
 function roomOf(n){return CLASSROOMS.find(c=>c.name===n)||CLASSROOMS[0];}
@@ -572,9 +818,12 @@ function showPage(id){
 
 // 今日上課堂數：與課表相同的規則（正常上課、今天星期、有上課時間且在 08–22 之間）
 function todayScheduledCount(){
+  if(gcalValid()&&weekEvents&&weekKey===mondayOf(0)){
+    const td=twToday();return weekEvents.filter(e=>evParts(e.start.dateTime).date===td).length;
+  }
   const today=DAYS[[6,0,1,2,3,4,5][new Date().getDay()]];
   return students.filter(s=>{
-    if(s.status==='不上課'||s.status==='暫停上課') return false;
+    if(s.status==='不上課'||s.status==='暫停上課'||isBooking(s)) return false;
     if(s.day!==today||!s.time) return false;
     const h=parseInt(normalizeTime(s.time).split(':')[0]);
     return h>=8&&h<22;
@@ -587,6 +836,7 @@ function renderHome(){
     <div class="stat-card"><div class="stat-num">${students.length}</div><div class="stat-label">總學生數</div></div>
     <div class="stat-card"><div class="stat-num">${todayScheduledCount()}</div><div class="stat-label">今日上課堂數</div></div>
     <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
+  document.getElementById('gcal-panel').innerHTML=NOTION_TOKEN?gcalPanelHtml():'';
   document.getElementById('classroom-list').innerHTML=CLASSROOMS.map(c=>{
     const cnt=students.filter(s=>s.room===c.name).length;
     return`<div class="classroom-row" onclick="openClassroom('${c.name}')">
@@ -599,18 +849,13 @@ function renderHome(){
 
 // ── SCHEDULE: 固定時間軸週日曆 ──
 function renderSchedule(){
-  const todayJS=new Date().getDay();
-  const jsToIdx=[6,0,1,2,3,4,5];
+  const mon=mondayOf(weekOffset);
+  const today=twToday();
+  const useCal=gcalValid();
+  if(useCal&&weekKey!==mon&&!weekLoading){loadWeek().then(()=>{if(curPage==='schedule')renderSchedule();});}
+  const calReady=useCal&&weekEvents&&weekKey===mon;
   const DAY_SHORT=['一','二','三','四','五','六','日'];
-  const now=new Date();
-  const curDow=now.getDay();
-  const weekDates=DAYS.map((_,i)=>{
-    const twIdx=[1,2,3,4,5,6,0];
-    const diff=twIdx[i]-curDow;
-    const d=new Date(now);d.setDate(now.getDate()+diff);
-    return d;
-  });
-
+  const weekDates=DAYS.map((_,i)=>addDays(mon,i));
   const ROW_H=56; // 每小時高度(px)
   const HALF_H=ROW_H/2;
   const START_H=8; // 從08:00開始
@@ -627,8 +872,8 @@ function renderSchedule(){
   const dayHeaders=`<div style="display:grid;grid-template-columns:36px repeat(7,1fr);background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;">
     <div style="border-right:1px solid var(--border);"></div>
     ${DAYS.map((d,i)=>{
-      const isT=jsToIdx[todayJS]===i;
-      const dt=weekDates[i];
+      const isT=weekDates[i]===today;
+      const dt={getDate:()=>parseInt(weekDates[i].slice(8))};
       return`<div style="text-align:center;padding:6px 2px;border-left:1px solid var(--border);">
         <div style="font-size:10px;color:${isT?'var(--accent)':'var(--text3)'};font-weight:700;">${DAY_SHORT[i]}</div>
         <div style="font-size:15px;font-weight:900;color:${isT?'var(--accent)':'var(--text)'};width:26px;height:26px;border-radius:50%;${isT?'background:rgba(93,184,122,0.15);':''}display:flex;align-items:center;justify-content:center;margin:2px auto 0;">${dt.getDate()}</div>
@@ -652,16 +897,27 @@ function renderSchedule(){
 
   // 畫學生格子（同時段重疊 → 同一格內往右錯開、漸層疊放）
   const evs=[];
-  activeStudents.forEach(s=>{
-    const dayIdx=DAYS.indexOf(s.day);
-    if(dayIdx<0||!s.time) return;
-    const norm=normalizeTime(s.time);
-    const [hh,mm]=norm.split(':').map(Number);
-    if(isNaN(hh)||hh<START_H||hh>=END_H) return;
-    const dur=parseInt(s.duration||'60')||60;
-    const st=hh*60+(mm||0);
-    evs.push({s,dayIdx,norm,dur,st,en:st+dur});
-  });
+  if(calReady){
+    weekEvents.forEach(ev=>{
+      const p=evParts(ev.start.dateTime);
+      const dur=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000)||60;
+      if(p.min<START_H*60||p.min>=END_H*60) return;
+      const sid=ev.extendedProperties?.private?.studentId;
+      const s=students.find(x=>x.id===sid)||{id:'',name:(ev.summary||'').replace('🥁 ',''),room:ev.location||''};
+      evs.push({s,dayIdx:(p.dow+6)%7,norm:p.hhmm,dur,st:p.min,en:p.min+dur,booking:ev.extendedProperties?.private?.kind==='booking'});
+    });
+  }else if(weekOffset===0&&!useCal){
+    activeStudents.filter(s=>!isBooking(s)).forEach(s=>{
+      const dayIdx=DAYS.indexOf(s.day);
+      if(dayIdx<0||!s.time) return;
+      const norm=normalizeTime(s.time);
+      const [hh,mm]=norm.split(':').map(Number);
+      if(isNaN(hh)||hh<START_H||hh>=END_H) return;
+      const dur=parseInt(s.duration||'60')||60;
+      const st=hh*60+(mm||0);
+      evs.push({s,dayIdx,norm,dur,st,en:st+dur});
+    });
+  }
   // 依星期分組，找出互相重疊的群組
   DAYS.forEach((_,di)=>{
     const list=evs.filter(e=>e.dayIdx===di).sort((a,b)=>a.st-b.st||a.en-b.en);
@@ -676,7 +932,7 @@ function renderSchedule(){
 
   const COL=`((100% - 36px) / 7)`;
   const studentBlocks=evs.map(e=>{
-    const {s,dayIdx,norm,dur,k,n}=e;
+    const {s,dayIdx,norm,dur,k,n,booking}=e;
     const rc=roomOf(s.room);
     const topPx=(e.st-START_H*60)/60*ROW_H;
     const heightPx=Math.max(dur/60*ROW_H,HALF_H*0.8);
@@ -688,14 +944,14 @@ function renderSchedule(){
     const bg=layered
       ?`linear-gradient(90deg, ${rc.color}10 0px, ${rc.color}55 14px), linear-gradient(90deg, rgba(10,15,10,0.15) 0px, var(--card) 10px)`
       :(n>1?`linear-gradient(90deg, ${rc.color}55, ${rc.color}25), var(--card)`:`${rc.color}30`);
-    return`<div onclick="openDetail('${s.id}','schedule')" title="${s.name} ${norm}" style="
+    return`<div ${s.id?`onclick="openDetail('${s.id}','schedule')"`:''} title="${s.name} ${norm}${booking?' 約課':''}" style="
       position:absolute;
       top:${topPx}px;
       left:${left};
       width:${width};
       height:${heightPx-2}px;
       background:${bg};
-      border-left:3px solid ${rc.color};
+      border-left:3px ${booking?'dashed':'solid'} ${rc.color};
       border-radius:5px;
       padding:3px 5px;
       cursor:pointer;
@@ -709,7 +965,17 @@ function renderSchedule(){
     </div>`;
   }).join('');
 
+  const nb='background:var(--card);border:1px solid var(--border2);color:var(--text2);border-radius:14px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit;';
+  const navBar=`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface);border-bottom:1px solid var(--border);">
+    <button style="${nb}" onclick="shiftWeek(-1)" ${useCal?'':'disabled'}>‹</button>
+    <div style="flex:1;text-align:center;font-size:13px;font-weight:700;color:var(--text);">${fmtMD(weekDates[0]).split(' ')[0]} – ${fmtMD(weekDates[6]).split(' ')[0]}${weekOffset===0?' · 本週':''}</div>
+    ${weekOffset!==0?`<button style="${nb}" onclick="shiftWeek(0)">本週</button>`:''}
+    <button style="${nb}" onclick="shiftWeek(1)" ${useCal?'':'disabled'}>›</button>
+  </div>
+  ${!useCal?`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);"><div style="flex:1;">未連接 Google 日曆，目前顯示 Notion 的固定課表</div><button style="${nb}color:var(--accent);" onclick="gcalConnect()">連接</button></div>`
+    :(!calReady?`<div style="padding:8px 12px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);">讀取 Google 日曆中…</div>`:'')}`;
   wrap.innerHTML=`<div style="min-width:340px;">
+    ${navBar}
     ${dayHeaders}
     <div style="position:relative;height:${totalH}px;overflow:hidden;">
       ${gridLines}
@@ -722,12 +988,13 @@ function renderSchedule(){
 let stuFilter2='全部';
 function renderStudents(){
   stuFilter2=stuFilter;
-  const filters=['全部',...CLASSROOMS.map(c=>c.name),'暫停/不上課'];
+  const filters=['全部',...CLASSROOMS.map(c=>c.name),'約課制','暫停/不上課'];
   document.getElementById('filter-scroll').innerHTML=filters.map(f=>
     `<div class="chip${stuFilter===f?' active':''}" onclick="setStuFilter('${f}')">${f}</div>`).join('');
 
   let list=students;
   if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status!=='正常上課');
+  else if(stuFilter==='約課制') list=students.filter(s=>isBooking(s)&&s.status!=='不上課');
   else if(stuFilter!=='全部') list=students.filter(s=>s.room===stuFilter&&s.status==='正常上課');
   else list=students.filter(s=>s.status==='正常上課');
 
@@ -746,7 +1013,7 @@ function renderStudents(){
           <div class="s-avatar">${avatarHtml(s,44)}</div>
           <div class="s-info">
             <div class="s-name">${s.name}</div>
-            <div class="s-meta">${s.room.replace(' Yamaha','')} · ${s.time||'—'}</div>
+            <div class="s-meta">${s.room.replace(' Yamaha','')} · ${isBooking(s)?'約課制':(s.time||'—')}</div>
           </div>
           <div class="s-right">
             <div class="s-stars">${starsUI(cycleStars(s.id))}</div>
@@ -782,7 +1049,8 @@ function renderDetail(id){
           <div class="dh-name">${s.name}</div>
           <div class="dh-tags">
             <span class="dh-tag ${rc.tag}">${rc.icon} ${s.room}</span>
-            <span class="dh-tag" style="background:var(--card2);color:var(--text2);">${s.day||'—'}</span>
+            ${isBooking(s)?`<span class="dh-tag" style="background:rgba(200,168,74,0.15);color:#c8a84a;">約課制</span>`:''}
+            <span class="dh-tag" style="background:var(--card2);color:var(--text2);">${isBooking(s)?'暫定':''}${s.day||'—'}</span>
             <span class="dh-tag" style="background:var(--card2);color:var(--text2);">🕐 ${s.time||'未設定'}${s.duration&&s.duration!=='60'?' · '+s.duration+'分':''}</span>
             <span class="dh-tag ${statusTag(s.status)}">${s.status}</span>
           </div>
@@ -799,6 +1067,11 @@ function renderDetail(id){
         <div class="sc-right"><div class="sc-num">${cy}/3</div><div class="sc-numlab">本輪</div></div>
       </div>
     </div>
+    <div class="rec-section-head">
+      <div><div class="section-title">近期課程</div><div class="rec-count">Google 日曆</div></div>
+      <button class="add-rec-btn" onclick="openBooking('${id}')">＋ ${isBooking(s)?'約課':'補課'}</button>
+    </div>
+    <div id="upcoming-list" style="margin-bottom:18px;"></div>
     <div class="rec-section-head">
       <div><div class="section-title">上課紀錄</div><div class="rec-count">${recs.length} 筆，由新到舊</div></div>
       <button class="add-rec-btn" onclick="openAddRecord('${id}')">＋ 新增</button>
@@ -819,6 +1092,7 @@ function renderDetail(id){
         </div>
       </div>`).join('')
     }</div>`;
+  loadUpcoming(id);
 }
 
 function openClassroom(name){
@@ -873,7 +1147,8 @@ function showStudentMenu(e,stuId){
 
 // ── CONFIRM ──
 let confirmCallback=null;
-function showConfirm(title,msg,cb){
+function showConfirm(title,msg,cb,okText){
+  document.getElementById('confirm-ok').textContent=okText||'刪除';
   document.getElementById('confirm-title').textContent=title;
   document.getElementById('confirm-msg').textContent=msg;
   confirmCallback=cb;
@@ -899,6 +1174,7 @@ function confirmDeleteStudent(id){
   const s=students.find(x=>x.id===id);
   showConfirm('刪除學生',`確定要刪除「${s?.name||''}」嗎？此操作無法復原。`,async()=>{
     try{
+      if(gcalValid()){try{await removeStudentFromCal(id);weekKey=null;}catch(e){console.error(e);}}
       await deletePage(id);
       await loadStudents();
       showPage(detailFrom==='classroom'?'classroom':'students');
@@ -975,6 +1251,7 @@ function openAddStudent(){
   document.getElementById('stu-time').value='19:00';
   document.getElementById('stu-duration').value='60';
   document.getElementById('stu-status').value='正常上課';
+  document.getElementById('stu-booking').value='每週固定';
   document.getElementById('stu-note').value='';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -990,6 +1267,7 @@ function editStudent(id){
   document.getElementById('stu-time').value=s.time||'19:00';
   document.getElementById('stu-duration').value=s.duration||'60';
   document.getElementById('stu-status').value=s.status||'正常上課';
+  document.getElementById('stu-booking').value=s.booking||'每週固定';
   document.getElementById('stu-note').value=s.note||'';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -1008,11 +1286,18 @@ async function saveStudent(){
       duration:document.getElementById('stu-duration').value,
       status:document.getElementById('stu-status').value,
       note:document.getElementById('stu-note').value.trim(),
+      booking:document.getElementById('stu-booking').value,
     };
     console.log('saving student:',data,editingStudentId);
+    let sid=editingStudentId;
     if(editingStudentId) await updateStudent(editingStudentId,data);
-    else await createStudent(data);
+    else sid=(await createStudent(data)).id;
     await loadStudents();
+    if(!HAS_BOOKING_FIELD&&data.booking==='約課制') showToast('⚠️ Notion 尚未建立「排課方式」欄位，約課制未儲存');
+    if(gcalValid()){
+      const st=students.find(x=>x.id===sid);
+      if(st){try{await syncStudent(st);weekKey=null;}catch(e){showToast('⚠️ 已存到 Notion，但日曆同步失敗：'+e.message);}}
+    }
     closeSheet('sheet-student');
     document.getElementById('stu-name').disabled=false;
     showToast(editingStudentId?'✅ 學生資料已更新！':'✅ 學生已新增！');
@@ -1039,6 +1324,7 @@ function updateDays(){
 }
 
 async function init(){
+  gcalInit();
   // 如果沒有 Token，顯示輸入畫面
   if(!NOTION_TOKEN){
     document.getElementById('stat-row').innerHTML=`
@@ -1058,6 +1344,7 @@ async function init(){
   try{
     await Promise.all([loadStudents(),loadRecords()]);
     renderHome();
+    if(gcalValid()){await loadWeek();renderHome();}
     showToast('✅ 已連接 Notion');
   }catch(e){
     document.getElementById('stat-row').innerHTML=`<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--red);">❌ 無法連接 Notion<br><small>${e.message}</small></div>`;
