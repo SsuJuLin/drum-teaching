@@ -931,13 +931,14 @@ function shiftWeek(n){weekOffset=n===0?0:weekOffset+n;renderSchedule();}
 const SWIPE_PAGES={
   schedule:{wrap:'schedule-wrap',go:d=>shiftWeek(d)},
   checkins:{wrap:'checkins-wrap',go:d=>shiftCkMonth(d)},
-  salary:{wrap:'salary-wrap',go:d=>shiftSalary(d)},
+  salary:{wrap:'salary-wrap',go:d=>{if(salaryView==='month')shiftSalary(d);}},
 };
 (function(){
   let sx=0,sy=0,st=0,tracking=false;
   document.addEventListener('touchstart',e=>{
     const cfg=SWIPE_PAGES[curPage];
     if(!cfg||e.touches.length!==1) return;
+    if(curPage==='salary'&&salaryView!=='month') return;
     if(!e.target.closest||!e.target.closest('#'+cfg.wrap)) return;
     if(e.target.closest('input,select,textarea')) return;
     if(e.touches[0].clientX<24) return; // 留給左邊緣返回手勢
@@ -2197,8 +2198,80 @@ function lessonPay(e,place){return Math.round(lessonRate(e,place)*(new Date(e.en
 let salaryOff=0,salaryRows=[],salaryErr='';
 function shiftSalary(n){salaryOff+=n;renderSalary();}
 function monthKey(y,m){return `${y}/${String(m).padStart(2,'0')}`;}
+// ── 薪資：圓餅圖、歷年表格 ──
+const PLACE_COLOR={'楊梅宏音 Yamaha':'#d4854a','林口星玥':'#4a90d4','內壢奧莉琪':'#9a5ad4','藝文鹿納':'#4ad490','泰順錄音室':'#c8a84a','其他':'#8a8a8a'};
+let salaryView='month';
+function setSalaryView(v){salaryView=v;renderSalary();}
+function salaryTabs(){
+  return`<div class="filter-scroll" style="padding:0 0 12px;">
+    <div class="chip${salaryView==='month'?' active':''}" onclick="setSalaryView('month')">每月</div>
+    <div class="chip${salaryView==='years'?' active':''}" onclick="setSalaryView('years')">歷年表格</div></div>`;
+}
+function pieHtml(list){
+  const items=list.filter(x=>x.pay>0);const total=items.reduce((a,x)=>a+x.pay,0);
+  if(!total) return '';
+  const R=54,r=32,cx=64,cy=64;let a0=-Math.PI/2;
+  const pt=(a,rad)=>`${(cx+rad*Math.cos(a)).toFixed(2)} ${(cy+rad*Math.sin(a)).toFixed(2)}`;
+  const segs=items.map(x=>{
+    const frac=x.pay/total;const a1=a0+frac*2*Math.PI;const large=frac>0.5?1:0;const c=PLACE_COLOR[x.place]||'#8a8a8a';
+    let d;
+    if(frac>0.9999) d=`M ${pt(-Math.PI/2,R)} A ${R} ${R} 0 1 1 ${pt(Math.PI*1.5-0.0001,R)} L ${pt(Math.PI*1.5-0.0001,r)} A ${r} ${r} 0 1 0 ${pt(-Math.PI/2,r)} Z`;
+    else d=`M ${pt(a0,R)} A ${R} ${R} 0 ${large} 1 ${pt(a1,R)} L ${pt(a1,r)} A ${r} ${r} 0 ${large} 0 ${pt(a0,r)} Z`;
+    a0=a1;return`<path d="${d}" fill="${c}"/>`;
+  }).join('');
+  const legend=items.sort((a,b)=>b.pay-a.pay).map(x=>`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0;">
+    <span style="width:9px;height:9px;border-radius:2px;background:${PLACE_COLOR[x.place]||'#8a8a8a'};flex-shrink:0;"></span>
+    <span style="flex:1;color:var(--text2);white-space:nowrap;">${x.place.replace(' Yamaha','')}</span>
+    <span style="color:var(--text3);">${Math.round(x.pay/total*100)}%</span></div>`).join('');
+  return`<div class="rec-card" style="padding:12px;margin-bottom:14px;display:flex;align-items:center;gap:14px;">
+    <svg width="128" height="128" viewBox="0 0 128 128" style="flex-shrink:0;">${segs}
+      <text x="64" y="61" text-anchor="middle" font-size="10" fill="var(--text3)">合計</text>
+      <text x="64" y="76" text-anchor="middle" font-size="13" font-weight="800" fill="var(--text)">${Math.round(total/1000)}k</text></svg>
+    <div style="flex:1;min-width:0;">${legend}</div></div>`;
+}
+async function renderSalaryYears(){
+  const wrap=document.getElementById('salary-wrap');
+  wrap.innerHTML=salaryTabs()+`<div class="rec-empty">讀取中…</div>`;
+  try{
+    const rows=await querySalary();
+    const cols=['楊梅宏音 Yamaha','內壢奧莉琪','林口星玥','藝文鹿納','泰順錄音室','其他'];
+    const data={};
+    rows.forEach(r=>{
+      let mk=null;
+      if(r.type==='入帳'){const m=(r.name||'').match(/^(\d{4})\/(\d{2})/);if(m)mk=`${m[1]}/${m[2]}`;}
+      else if(r.type&&r.date) mk=r.date.slice(0,7).replace('-','/');
+      if(!mk) return;
+      const pl=cols.includes(r.place)?r.place:'其他';
+      (data[mk]=data[mk]||{})[pl]=(data[mk][pl]||0)+(r.amount||0);
+    });
+    const months=Object.keys(data).sort().reverse();
+    if(!months.length){wrap.innerHTML=salaryTabs()+`<div class="rec-empty">還沒有入帳紀錄</div>`;return;}
+    const n=v=>v?Math.round(v).toLocaleString():'<span style="color:var(--border2);">–</span>';
+    const th='padding:6px 6px;font-size:11px;color:var(--text3);font-weight:700;text-align:right;white-space:nowrap;position:sticky;top:0;background:var(--surface);';
+    const td='padding:5px 6px;font-size:12px;text-align:right;white-space:nowrap;color:var(--text2);';
+    let body='',year=null,ysum=null;
+    const flushYear=()=>{if(!year)return;const t=cols.reduce((a,c)=>a+(ysum[c]||0),0);
+      body+=`<tr style="background:var(--card2);"><td style="${td}text-align:left;font-weight:800;color:var(--text);">${year} 合計</td>${cols.map(c=>`<td style="${td}font-weight:700;color:var(--text);">${n(ysum[c])}</td>`).join('')}<td style="${td}font-weight:800;color:var(--accent);">${n(t)}</td></tr>`;};
+    months.forEach(mk=>{
+      const y=mk.slice(0,4);
+      if(y!==year){flushYear();year=y;ysum={};}
+      const d=data[mk];const t=cols.reduce((a,c)=>a+(d[c]||0),0);
+      cols.forEach(c=>ysum[c]=(ysum[c]||0)+(d[c]||0));
+      body+=`<tr style="border-top:1px solid var(--border);"><td style="${td}text-align:left;color:var(--text);">${mk}</td>${cols.map(c=>`<td style="${td}">${n(d[c])}</td>`).join('')}<td style="${td}font-weight:700;color:var(--text);">${n(t)}</td></tr>`;
+    });
+    flushYear();
+    const grand=months.reduce((a,mk)=>a+cols.reduce((b,c)=>b+(data[mk][c]||0),0),0);
+    wrap.innerHTML=salaryTabs()+`<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">依 Notion 入帳與額外收入・總計 <b style="color:var(--text);">$${grand.toLocaleString()}</b></div>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">
+      <table style="border-collapse:collapse;width:100%;min-width:520px;">
+        <thead><tr><th style="${th}text-align:left;">年月</th>${cols.map(c=>`<th style="${th}">${c.replace(' Yamaha','').slice(0,2)}</th>`).join('')}<th style="${th}">合計</th></tr></thead>
+        <tbody>${body}</tbody></table></div>`;
+  }catch(e){wrap.innerHTML=salaryTabs()+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
+}
+
 async function renderSalary(){
   const wrap=document.getElementById('salary-wrap');
+  if(salaryView==='years'){if(!gcalValid()&&!NOTION_TOKEN)return;return renderSalaryYears();}
   if(!gcalValid()){wrap.innerHTML=`<div class="rec-empty">請先連接 Google 日曆</div>`;return;}
   const td=twToday();let y=parseInt(td.slice(0,4)),m=parseInt(td.slice(5,7))+salaryOff;
   while(m<1){m+=12;y--;}while(m>12){m-=12;y++;}
@@ -2207,7 +2280,7 @@ async function renderSalary(){
   const nm=m===12?1:m+1,ny=m===12?y+1:y;
   const mk=monthKey(y,m);
   const nb='background:var(--card);border:1px solid var(--border2);color:var(--text2);border-radius:14px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit;';
-  const head=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+  const head=salaryTabs()+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
     <button style="${nb}" onclick="shiftSalary(-1)">‹</button>
     <div style="flex:1;text-align:center;font-size:15px;font-weight:800;color:var(--text);">${y} 年 ${m} 月的薪資</div>
     <button style="${nb}" onclick="shiftSalary(1)">›</button></div>`;
@@ -2269,6 +2342,7 @@ async function renderSalary(){
       ${salaryErr?`<div style="font-size:11px;color:var(--red);margin-top:8px;">讀不到 Notion「薪資紀錄」資料庫（${esc(salaryErr)}），請確認資料庫已「連接」爵士鼓教學系統</div>`:''}
       ${DB_SALARY&&!salaryErr?`<button class="add-rec-btn" style="margin-top:10px;" onclick="openIncome()">＋ 獎金／錄音案子／其他</button>`:`<div style="font-size:11px;color:#c8a84a;margin-top:8px;">尚未連接 Notion「薪資紀錄」資料庫，入帳與額外收入暫時無法記錄</div>`}
     </div>`;
+    html+=pieHtml(list);
     if(!list.length) html+=`<div class="rec-empty">這個月沒有收入紀錄</div>`;
     list.forEach(x=>{
       const rule=PAY_RULES[x.place]||{};
