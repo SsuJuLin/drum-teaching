@@ -927,25 +927,34 @@ async function loadWeek(){
   weekLoading=false;
 }
 function shiftWeek(n){weekOffset=n===0?0:weekOffset+n;renderSchedule();}
-// 課表左右滑動切換週
+// 課表（週）、打卡紀錄與薪資（月）左右滑動切換
+const SWIPE_PAGES={
+  schedule:{wrap:'schedule-wrap',go:d=>shiftWeek(d)},
+  checkins:{wrap:'checkins-wrap',go:d=>shiftCkMonth(d)},
+  salary:{wrap:'salary-wrap',go:d=>shiftSalary(d)},
+};
 (function(){
   let sx=0,sy=0,st=0,tracking=false;
   document.addEventListener('touchstart',e=>{
-    if(curPage!=='schedule'||e.touches.length!==1) return;
-    if(!e.target.closest||!e.target.closest('#schedule-wrap')) return;
+    const cfg=SWIPE_PAGES[curPage];
+    if(!cfg||e.touches.length!==1) return;
+    if(!e.target.closest||!e.target.closest('#'+cfg.wrap)) return;
+    if(e.target.closest('input,select,textarea')) return;
+    if(e.touches[0].clientX<24) return; // 留給左邊緣返回手勢
     sx=e.touches[0].clientX;sy=e.touches[0].clientY;st=Date.now();tracking=true;
   },{passive:true});
   document.addEventListener('touchend',e=>{
     if(!tracking) return;tracking=false;
     const t=e.changedTouches[0];const dx=t.clientX-sx,dy=t.clientY-sy;
     if(Math.abs(dx)<60||Math.abs(dx)<Math.abs(dy)*1.5||Date.now()-st>800) return;
-    if(!gcalValid()){showToast('連接 Google 日曆後可切換週');return;}
+    if(!gcalValid()){showToast('請先連接 Google 日曆');return;}
+    const cfg=SWIPE_PAGES[curPage];if(!cfg) return;
     const dir=dx<0?1:-1;
-    const w=document.getElementById('schedule-wrap');
+    const w=document.getElementById(cfg.wrap);
     w.style.transition='transform .18s ease,opacity .18s ease';
     w.style.transform=`translateX(${dir>0?-40:40}px)`;w.style.opacity='0';
     setTimeout(()=>{
-      shiftWeek(dir);
+      cfg.go(dir);
       w.style.transition='none';w.style.transform=`translateX(${dir>0?40:-40}px)`;
       requestAnimationFrame(()=>{w.style.transition='transform .18s ease,opacity .18s ease';w.style.transform='translateX(0)';w.style.opacity='1';});
     },180);
