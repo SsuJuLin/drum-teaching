@@ -421,6 +421,33 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
   </div>
 </div>
 
+<!-- EXPORT SHEET -->
+<div class="overlay" id="sheet-export">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">📋 匯出課表</div>
+    <div class="sheet-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">從哪天開始</label><input class="form-input" type="date" id="export-start" onchange="buildExport()"></div>
+        <div class="form-group"><label class="form-label">天數</label>
+          <select class="form-select" id="export-days" onchange="buildExport()">
+            <option value="1">1 天</option><option value="2" selected>2 天</option><option value="3">3 天</option><option value="4">4 天</option><option value="5">5 天</option><option value="6">6 天</option><option value="7">7 天</option>
+          </select></div>
+      </div>
+      <div class="form-group"><label class="form-label">附上請假與調課</label>
+        <select class="form-select" id="export-changes" onchange="buildExport()">
+          <option value="none">不附上</option><option value="range">只有這幾天</option><option value="4w" selected>這幾天＋之後 4 週</option>
+        </select></div>
+      <div class="form-label" style="margin-bottom:6px;">點文字即可複製</div>
+      <pre id="export-text" onclick="copyExport()" style="background:var(--card2);border:1px solid var(--border2);border-radius:10px;padding:12px;font-family:inherit;font-size:14px;line-height:1.7;color:var(--text);white-space:pre-wrap;cursor:pointer;margin:0;min-height:80px;user-select:text;-webkit-user-select:text;"></pre>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-export')">關閉</button>
+      <button class="btn-save" onclick="copyExport()">📋 複製</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -1423,6 +1450,98 @@ function cmdBoxHtml(){
   </div>`;
 }
 
+// ══════════ 匯出課表文字 ══════════
+function shortName(name){
+  const n=(name||'').replace(/[^\p{L}\p{N}\s]/gu,'').trim();
+  return /^[\u4e00-\u9fff]{3,4}$/.test(n)?n.slice(1):n;
+}
+function mdShort(ds){return `${parseInt(ds.slice(5,7))}/${parseInt(ds.slice(8,10))}`;}
+function fmtRange(a,b,hourOnly){
+  const f=m=>hourOnly?String(Math.floor(m/60)):String(Math.floor(m/60)).padStart(2,'0')+String(m%60).padStart(2,'0');
+  return `${f(a)}-${f(b)}`;
+}
+function openExport(){
+  if(!gcalValid()){showToast('請先連接 Google 日曆');gcalConnect();return;}
+  const mon=mondayOf(weekOffset);
+  const today=twToday();
+  document.getElementById('export-start').value=(today>=mon&&today<addDays(mon,7))?today:mon;
+  document.getElementById('sheet-export').classList.add('show');
+  buildExport();
+}
+let exportSeq=0;
+async function buildExport(){
+  const ds=document.getElementById('export-start').value;
+  const days=parseInt(document.getElementById('export-days').value)||1;
+  const mode=document.getElementById('export-changes').value;
+  const box=document.getElementById('export-text');
+  if(!ds) return;
+  box.textContent='產生中…';
+  const seq=++exportSeq;
+  const end=addDays(ds,days); // 不含
+  const chEnd=mode==='4w'?addDays(end,28):end;
+  try{
+    const d=await gcal('GET','/events',null,[['timeMin',twISO(addDays(ds,-14),'00:00')],['timeMax',twISO(addDays(chEnd,14),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]);
+    if(seq!==exportSeq) return;
+    const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+    const lessons=items.filter(e=>e.start?.dateTime&&e.extendedProperties?.private?.studentId);
+    const tLeaves=items.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start?.date);
+    const out=[];
+    for(let i=0;i<days;i++){
+      const day=addDays(ds,i);
+      const wd='一二三四五六日'[(new Date(day+'T00:00:00Z').getUTCDay()+6)%7];
+      out.push(`${mdShort(day)} ${wd}`);
+      const all=lessons.filter(e=>evParts(e.start.dateTime).date===day)
+        .map(e=>{const p=evParts(e.start.dateTime);const dur=Math.round((new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000);
+          return{st:p.min,en:p.min+dur,name:shortName(evName(e)),moved:e.extendedProperties.private.moved==='1',empty:!!evState(e)};})
+        .sort((a,b)=>a.st-b.st||a.en-b.en);
+      // 請假、停課的時段顯示成空白；若已被別人的課佔用就不列
+      const act=all.filter(x=>!x.empty||!all.some(y=>!y.empty&&y.st<x.en&&y.en>x.st));
+      const off=tLeaves.some(e=>leaveDays(e).includes(day));
+      if(!act.some(x=>!x.empty)){out.push(off?'（老師請假）':'（沒有課）');out.push('');continue;}
+      const hourOnly=act.every(x=>x.st%60===0&&x.en%60===0);
+      let cur=act[0].st;
+      act.forEach(x=>{
+        if(x.st>cur) out.push(fmtRange(cur,x.st,false));
+        out.push(x.empty?fmtRange(x.st,x.en,hourOnly):`${fmtRange(x.st,x.en,hourOnly)} ${x.name}${x.moved?'（調）':''}`);
+        cur=Math.max(cur,x.en);
+      });
+      out.push('');
+    }
+    if(mode!=='none'){
+      const inCh=dd=>dd>=ds&&dd<chEnd;
+      const lines=[];
+      // 調課：原日期或新日期落在範圍內
+      lessons.filter(e=>e.extendedProperties.private.moved==='1'&&!evState(e)).forEach(e=>{
+        const o=e.originalStartTime?.dateTime||e.extendedProperties.private.origStart;if(!o)return;
+        const od=evParts(o).date,nd=evParts(e.start.dateTime).date;
+        if(!inCh(od)&&!inCh(nd)) return;
+        lines.push({k:nd,t:`${shortName(evName(e))} ${mdShort(od)}調課至${mdShort(nd)}`});
+      });
+      // 請假：同一位學生合併成一行
+      const lv={};
+      lessons.filter(e=>evState(e)==='leave'&&inCh(evParts(e.start.dateTime).date)).forEach(e=>{
+        const n=shortName(evName(e));(lv[n]=lv[n]||[]).push(evParts(e.start.dateTime).date);
+      });
+      Object.entries(lv).forEach(([n,arr])=>{arr.sort();lines.push({k:arr[0],t:arr.length===1?`${n} ${mdShort(arr[0])}請假`:`${n} ${arr.map(mdShort).join(' ')} 請假`});});
+      // 老師請假
+      tLeaves.forEach(e=>{const dd=leaveDays(e).filter(inCh);if(!dd.length)return;const note=e.extendedProperties.private.note;
+        lines.push({k:dd[0],t:`老師 ${mdShort(dd[0])}${dd.length>1?'-'+mdShort(dd[dd.length-1]):''} 請假${note?'（'+note+'）':''}`});});
+      lines.sort((a,b)=>a.k<b.k?-1:a.k>b.k?1:0);
+      if(lines.length) out.push(...lines.map(x=>x.t));
+    }
+    box.textContent=out.join('\n').replace(/\n+$/,'');
+  }catch(e){if(seq===exportSeq)box.textContent='❌ '+e.message;}
+}
+async function copyExport(){
+  const t=document.getElementById('export-text').textContent;
+  try{await navigator.clipboard.writeText(t);showToast('✅ 已複製');}
+  catch(e){
+    const r=document.createRange();r.selectNodeContents(document.getElementById('export-text'));
+    const sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);
+    try{document.execCommand('copy');showToast('✅ 已複製');}catch(e2){showToast('請長按文字手動複製');}
+  }
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -1698,6 +1817,7 @@ function renderSchedule(){
     <div style="flex:1;text-align:center;font-size:13px;font-weight:700;color:var(--text);">${fmtMD(weekDates[0]).split(' ')[0]} – ${fmtMD(weekDates[6]).split(' ')[0]}${weekOffset===0?' · 本週':''}</div>
     ${weekOffset!==0?`<button style="${nb}" onclick="shiftWeek(0)">本週</button>`:''}
     <button style="${nb}" onclick="shiftWeek(1)" ${useCal?'':'disabled'}>›</button>
+    <button style="${nb}color:var(--accent);" onclick="openExport()">匯出</button>
   </div>
   ${!useCal?`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);"><div style="flex:1;">未連接 Google 日曆，目前顯示 Notion 的固定課表</div><button style="${nb}color:var(--accent);" onclick="gcalConnect()">連接</button></div>`
     :(!calReady?`<div style="padding:8px 12px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);">讀取 Google 日曆中…</div>`:'')}`;
