@@ -386,6 +386,28 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
   </div>
 </div>
 
+<!-- TEACHER LEAVE SHEET -->
+<div class="overlay" id="sheet-leave">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">🏖 老師請假</div>
+    <div class="sheet-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">開始日期</label><input class="form-input" type="date" id="leave-start" onchange="if(document.getElementById('leave-end').value<this.value)document.getElementById('leave-end').value=this.value"></div>
+        <div class="form-group"><label class="form-label">結束日期</label><input class="form-input" type="date" id="leave-end"></div>
+      </div>
+      <div class="form-group"><label class="form-label">事由（選填）</label><input class="form-input" id="leave-note" placeholder="例如：中國出差"></div>
+      <div style="font-size:12px;color:var(--text3);margin:-4px 0 14px;line-height:1.6;">期間內所有固定課、約課都會從日曆取消，期間也無法新增約課。</div>
+      <div class="form-label" style="margin-bottom:8px;">已登記的請假</div>
+      <div id="leave-list"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-leave')">關閉</button>
+      <button class="btn-save" id="save-leave-btn" onclick="saveLeave()">✅ 確定請假</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -686,7 +708,10 @@ async function loadWeek(){
   weekLoading=true;
   try{
     const d=await gcal('GET','/events',null,[['timeMin',twISO(mon,'00:00')],['timeMax',twISO(addDays(mon,7),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]);
-    weekEvents=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime);weekKey=mon;
+    const all=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+    weekEvents=all.filter(e=>e.start&&e.start.dateTime);
+    weekLeaves=all.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start&&e.start.date);
+    weekKey=mon;
   }catch(e){weekEvents=null;weekKey=null;showToast('❌ '+e.message);}
   weekLoading=false;
 }
@@ -745,16 +770,112 @@ async function saveBooking(){
   if(!ds||!tm){showToast('請選擇日期與時間');return;}
   const btn=document.getElementById('save-book-btn');btn.disabled=true;btn.textContent='建立中…';
   try{
+    if(await isTeacherOnLeave(ds)){showToast(`❌ ${fmtMD(ds)} 你已請假，不能排課`);btn.disabled=false;btn.textContent='✅ 建立';return;}
     await gcal('POST','/events',evBody(s,ds,tm,dur,'booking'));
     weekKey=null;closeSheet('sheet-booking');showToast(`✅ 已約 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);
   }catch(e){showToast('❌ '+e.message);}
   btn.disabled=false;btn.textContent='✅ 建立';
 }
+// ── 老師請假（期間內的課全部取消，可一鍵恢復）──
+let weekLeaves=[];
+function leaveDays(ev){ // 回傳此請假涵蓋的日期陣列
+  const out=[];let d=ev.start.date;const end=ev.end.date;
+  while(d&&d<end&&out.length<400){out.push(d);d=addDays(d,1);}
+  return out;
+}
+function openLeave(){
+  if(!gcalValid()){showToast('請先連接 Google 日曆');gcalConnect();return;}
+  document.getElementById('leave-start').value=twToday();
+  document.getElementById('leave-end').value=twToday();
+  document.getElementById('leave-note').value='';
+  document.getElementById('sheet-leave').classList.add('show');
+  loadLeaves();
+}
+async function loadLeaves(){
+  const box=document.getElementById('leave-list');
+  box.innerHTML=`<div style="font-size:12px;color:var(--text3);">讀取中…</div>`;
+  try{
+    const d=await gcal('GET','/events',null,[['privateExtendedProperty','kind=teacherLeave'],['timeMin',twISO(addDays(twToday(),-1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','20']]);
+    const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+    box.innerHTML=items.length===0?`<div style="font-size:12px;color:var(--text3);">目前沒有已登記的請假</div>`:
+      items.map(ev=>{
+        const days=leaveDays(ev);const pr=ev.extendedProperties?.private||{};
+        const n=parseInt(pr.count||'0');
+        return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:700;color:var(--text);">${fmtMD(days[0])}${days.length>1?' – '+fmtMD(days[days.length-1]):''}</div>
+            <div style="font-size:11px;color:var(--text3);">${pr.note?pr.note+' · ':''}取消了 ${n} 堂課</div>
+          </div>
+          <button onclick="cancelLeave('${ev.id}')" style="background:transparent;border:1px solid var(--border2);color:var(--accent);border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">取消請假</button>
+        </div>`;
+      }).join('');
+  }catch(e){box.innerHTML=`<div style="font-size:12px;color:var(--red);">${e.message}</div>`;}
+}
+async function saveLeave(){
+  const ds=document.getElementById('leave-start').value,de=document.getElementById('leave-end').value;
+  const note=document.getElementById('leave-note').value.trim();
+  if(!ds||!de){showToast('請選擇日期');return;}
+  if(de<ds){showToast('結束日期不能早於開始日期');return;}
+  const btn=document.getElementById('save-leave-btn');btn.disabled=true;btn.textContent='查詢課程中…';
+  let lessons=[];
+  try{
+    const d=await gcal('GET','/events',null,[['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(de,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]);
+    lessons=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&e.extendedProperties?.private?.studentId);
+  }catch(e){showToast('❌ '+e.message);btn.disabled=false;btn.textContent='✅ 確定請假';return;}
+  btn.disabled=false;btn.textContent='✅ 確定請假';
+  const names=[...new Set(lessons.map(e=>(e.summary||'').replace('🥁 ','')))];
+  const range=ds===de?fmtMD(ds):`${fmtMD(ds)} – ${fmtMD(de)}`;
+  showConfirm('確認請假',`${range}，共 ${lessons.length} 堂課會從日曆取消${names.length?'：'+names.join('、'):''}。之後可在這裡按「取消請假」恢復。`,async()=>{
+    btn.disabled=true;
+    const ids=[];let fail=0;
+    for(let i=0;i<lessons.length;i++){
+      btn.textContent=`取消課程中… ${i+1}/${lessons.length}`;
+      try{await gcal('PATCH',`/events/${lessons[i].id}`,{status:'cancelled'});ids.push(lessons[i].id);}catch(e){fail++;}
+    }
+    // 把取消的課 ID 記在請假行程裡，之後才能恢復
+    const priv={kind:'teacherLeave',count:String(ids.length),note:note.slice(0,200)};
+    let chunk='',ci=0;
+    ids.forEach(id=>{ if((chunk+','+id).length>1000){priv['r'+ci++]=chunk;chunk='';} chunk=chunk?chunk+','+id:id; });
+    if(chunk) priv['r'+ci]=chunk;
+    try{
+      await gcal('POST','/events',{
+        summary:`🏖 老師請假${note?'｜'+note:''}`,description:'由爵士鼓教學系統建立',
+        start:{date:ds},end:{date:addDays(de,1)},transparency:'transparent',
+        extendedProperties:{private:priv},
+      });
+      showToast(fail?`⚠️ 已請假，但有 ${fail} 堂課取消失敗`:`✅ 已請假，取消 ${ids.length} 堂課`);
+    }catch(e){showToast('❌ 建立請假失敗：'+e.message);}
+    btn.disabled=false;btn.textContent='✅ 確定請假';
+    weekKey=null;loadLeaves();
+    if(curPage==='schedule') renderSchedule();
+    if(curPage==='home'){await loadWeek();renderHome();}
+  },'確定請假');
+}
+function cancelLeave(evId){
+  showConfirm('取消請假','這段期間被取消的課會恢復到日曆上。',async()=>{
+    try{
+      const ev=await gcal('GET',`/events/${evId}`);
+      const pr=ev.extendedProperties?.private||{};
+      const ids=Object.keys(pr).filter(k=>/^r\d+$/.test(k)).sort((a,b)=>a.slice(1)-b.slice(1)).flatMap(k=>pr[k].split(',')).filter(Boolean);
+      let fail=0;
+      for(const id of ids){try{await gcal('PATCH',`/events/${id}`,{status:'confirmed'});}catch(e){fail++;}}
+      await gcal('DELETE',`/events/${evId}`);
+      showToast(fail?`⚠️ 已取消請假，${fail} 堂課無法恢復`:`✅ 已取消請假，恢復 ${ids.length} 堂課`);
+      weekKey=null;loadLeaves();
+      if(curPage==='schedule') renderSchedule();
+    }catch(e){showToast('❌ '+e.message);}
+  },'取消請假');
+}
+async function isTeacherOnLeave(ds){
+  const d=await gcal('GET','/events',null,[['privateExtendedProperty','kind=teacherLeave'],['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true']]);
+  return (d&&d.items||[]).some(e=>e.status!=='cancelled');
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin:0 0 14px;';
   const b='border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
   if(!gcalValid()) return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆未連接</div><button style="${b}background:var(--accent);color:#0a0f0a;" onclick="gcalConnect()">連接</button></div>`;
-  return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text2);">📅 Google 日曆已連接</div><button id="sync-all-btn" style="${b}background:var(--card2);color:var(--text);border:1px solid var(--border2);" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'全部同步到日曆'}</button></div>`;
+  return`<div style="${box}"><div style="flex:1;min-width:0;font-size:13px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📅 日曆已連接</div><button style="${b}background:var(--card2);color:#c8a84a;border:1px solid var(--border2);" onclick="openLeave()">🏖 我要請假</button><button id="sync-all-btn" style="${b}background:var(--card2);color:var(--text);border:1px solid var(--border2);" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'同步全部'}</button></div>`;
 }
 
 function roomOf(n){return CLASSROOMS.find(c=>c.name===n)||CLASSROOMS[0];}
@@ -944,6 +1065,9 @@ function renderSchedule(){
   });
 
   const COL=`((100% - 36px) / 7)`;
+  const leaveIdx=new Set();
+  if(calReady) weekLeaves.forEach(ev=>leaveDays(ev).forEach(d=>{const i=weekDates.indexOf(d);if(i>=0)leaveIdx.add(i);}));
+  const leaveBlocks=[...leaveIdx].map(i=>`<div style="position:absolute;top:0;bottom:0;left:calc(36px + ${i} * ${COL});width:${COL};background:repeating-linear-gradient(45deg,rgba(200,168,74,0.10) 0 6px,transparent 6px 12px);border-left:1px solid rgba(200,168,74,0.35);z-index:1;pointer-events:none;"><div style="text-align:center;font-size:10px;font-weight:700;color:#c8a84a;padding-top:4px;">🏖 請假</div></div>`).join('');
   const studentBlocks=evs.map(e=>{
     const {s,dayIdx,norm,dur,k,n,booking}=e;
     const rc=roomOf(s.room);
@@ -992,6 +1116,7 @@ function renderSchedule(){
     ${dayHeaders}
     <div style="position:relative;height:${totalH}px;overflow:hidden;">
       ${gridLines}
+      ${leaveBlocks}
       ${studentBlocks}
     </div>
   </div>`;
