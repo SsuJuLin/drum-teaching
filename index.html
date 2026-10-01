@@ -476,6 +476,7 @@ async function deleteRecord(id){ return notionAPI('DELETE',`/pages/${id}`,null);
 async function deletePage(id){ return notionAPI('PATCH',`/pages/${id}`,{archived:true}); }
 async function updateStudent(id,data){
   return notionAPI('PATCH',`/pages/${id}`,{properties:{
+    '學生':{title:[{text:{content:String(data.name||'')}}]},
     '教室':{select:{name:data.room}},
     '星期':{select:{name:data.day}},
     '上課時間':{rich_text:[{text:{content:normalizeTime(data.time||'')}}]},
@@ -983,7 +984,7 @@ function editStudent(id){
   const s=students.find(x=>x.id===id);if(!s)return;
   editingStudentId=id;
   document.getElementById('stu-sheet-title').textContent='✎ 編輯學生資料';
-  document.getElementById('stu-name').value=s.name;document.getElementById('stu-name').disabled=true;
+  document.getElementById('stu-name').value=s.name;document.getElementById('stu-name').disabled=false;
   document.getElementById('stu-room').value=s.room;updateDays();
   document.getElementById('stu-day').value=s.day;
   document.getElementById('stu-time').value=s.time||'19:00';
@@ -995,7 +996,7 @@ function editStudent(id){
 
 async function saveStudent(){
   const name=document.getElementById('stu-name').value.trim();
-  if(!editingStudentId&&!name){showToast('請輸入學生姓名');return;}
+  if(!name){showToast('請輸入學生姓名');return;}
   const btn=document.getElementById('save-stu-btn');
   btn.textContent='儲存中…';btn.disabled=true;
   try{
