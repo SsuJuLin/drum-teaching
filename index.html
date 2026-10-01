@@ -127,7 +127,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
 .rec-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
 .rec-count{font-size:12px;color:var(--text3);}
 .sec-line{display:flex;align-items:baseline;min-width:0;flex:1;white-space:nowrap;overflow:hidden;margin-right:8px;}
-.sec-line .section-title{font-size:15px;font-weight:800;color:var(--accent);letter-spacing:0.02em;flex-shrink:0;}
+.sec-line .section-title{font-size:15px;font-weight:800;color:var(--text);letter-spacing:0.02em;flex-shrink:0;}
 .sec-line .rec-count{overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .add-rec-btn{background:var(--accent);color:#0a0f0a;border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;}
 .rec-list{display:flex;flex-direction:column;gap:8px;}
@@ -912,29 +912,39 @@ async function loadToday(){
   if(!gcalValid()){todayEvents=null;todayKey=null;return;}
   const td=twToday();if(todayKey===td&&todayEvents)return;
   try{
-    const d=await gcal('GET','/events',null,[['timeMin',twISO(td,'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','100']]);
+    const d=await gcal('GET','/events',null,[['timeMin',twISO(addDays(td,-1),'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','200']]);
     todayEvents=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&e.extendedProperties?.private?.studentId);
     todayKey=td;
   }catch(e){todayEvents=null;}
 }
 function unrecHtml(){
-  if(!gcalValid()||!todayEvents||todayKey!==twToday()) return '';
-  const td=twToday(),now=Date.now();
-  const lessons=todayEvents.filter(e=>!evState(e));
-  const done=lessons.filter(e=>new Date(e.end.dateTime).getTime()<=now);
-  if(done.length===0) return '';
-  const miss=done.filter(e=>!records.some(r=>r.studentId===e.extendedProperties.private.studentId&&r.date===td));
   const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;';
-  if(miss.length===0) return`<div style="${box}font-size:13px;color:var(--accent);">✅ 今天上完的 ${done.length} 堂課都記錄好了</div>`;
+  if(!gcalValid()) return`<div style="${box}display:flex;align-items:center;gap:10px;"><div style="flex:1;font-size:13px;color:var(--text3);">📝 連接 Google 日曆後，會在這裡提醒未紀錄的課</div><button style="${smallBtn('var(--accent)')}" onclick="gcalConnect()">連接</button></div>`;
+  if(!todayEvents||todayKey!==twToday()) return`<div style="${box}font-size:13px;color:var(--text3);">📝 讀取今日課程中…</div>`;
+  const td=twToday(),yd=addDays(td,-1),now=Date.now();
+  const lessons=todayEvents.filter(e=>!evState(e));
+  const dateOf=e=>evParts(e.start.dateTime).date;
+  const ended=lessons.filter(e=>new Date(e.end.dateTime).getTime()<=now);
+  const isRec=e=>records.some(r=>r.studentId===e.extendedProperties.private.studentId&&r.date===dateOf(e));
+  const miss=ended.filter(e=>!isRec(e));
+  const todayAll=lessons.filter(e=>dateOf(e)===td);
+  const todayEnded=ended.filter(e=>dateOf(e)===td);
+  if(miss.length===0){
+    let msg;
+    if(todayAll.length===0) msg='📝 今天沒有課';
+    else if(todayEnded.length===0) msg=`📝 今天有 ${todayAll.length} 堂課，上完後會在這裡提醒你記錄`;
+    else msg=`✅ 今天上完的 ${todayEnded.length} 堂課都記錄好了${todayEnded.length<todayAll.length?`（還有 ${todayAll.length-todayEnded.length} 堂未上）`:''}`;
+    return`<div style="${box}font-size:13px;color:${msg.startsWith('✅')?'var(--accent)':'var(--text3)'};">${msg}</div>`;
+  }
   return`<div style="${box}border-color:rgba(200,168,74,0.5);">
-    <div style="font-size:13px;font-weight:700;color:#c8a84a;margin-bottom:8px;">📝 今天還有 ${miss.length} 堂未紀錄</div>
+    <div style="font-size:13px;font-weight:700;color:#c8a84a;margin-bottom:8px;">📝 還有 ${miss.length} 堂課未紀錄</div>
     ${miss.map(e=>{const p=evParts(e.start.dateTime);const sid=e.extendedProperties.private.studentId;
       return`<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border);">
-        <div style="flex:1;font-size:13px;color:var(--text);">${evName(e)} <span style="font-size:11px;color:var(--text3);">${p.hhmm}</span></div>
-        <button onclick="recordLesson('${sid}','${p.hhmm}')" style="${smallBtn('var(--accent)')}">記錄</button></div>`;}).join('')}
+        <div style="flex:1;font-size:13px;color:var(--text);">${evName(e)} <span style="font-size:11px;color:var(--text3);">${p.date===yd?'昨天 ':''}${p.hhmm}</span></div>
+        <button onclick="recordLesson('${sid}','${p.hhmm}','${p.date}')" style="${smallBtn('var(--accent)')}">記錄</button></div>`;}).join('')}
   </div>`;
 }
-function recordLesson(sid,hhmm){openAddRecord(sid);document.getElementById('rec-time').value=hhmm;}
+function recordLesson(sid,hhmm,ds){openAddRecord(sid);document.getElementById('rec-time').value=hhmm;if(ds)document.getElementById('rec-date').value=ds;}
 
 // ── 每日手機提醒（Google 日曆通知）──
 let reminderEv=undefined;
