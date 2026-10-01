@@ -1034,7 +1034,7 @@ function lessonRow(ev){
   const dur=(new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000;
   const pr=ev.extendedProperties?.private||{};const st=evState(ev);
   const isB=pr.kind==='booking',isMk=pr.makeup==='1';
-  let label=st==='leave'?'🚫 請假':st==='teacherOff'?'⛔ 老師停課':isMk?'補課':isB?'約課':'固定課';
+  let label=st==='leave'?'🚫 請假':st==='teacherOff'?'⛔ 老師停課':isMk?'補課':pr.logged==='1'?'補登':isB?'約課':'固定課';
   if(pr.moved==='1'&&!st){
     const o=ev.originalStartTime?.dateTime||pr.origStart;
     label+=(pr.fromOff==='1'?'・停課改期':'・已調課')+(o?`（原 ${fmtMD(evParts(o).date).split(' ')[0]} ${evParts(o).hhmm}）`:'');
@@ -1424,6 +1424,16 @@ function findDates(text){
   }
   return out.sort((a,b)=>a.i-b.i);
 }
+function findRange(text){
+  const m=text.match(/(\d{1,2})[:：]?(\d{2})?\s*[-~～到至]\s*(\d{1,2})[:：]?(\d{2})?(?![\/月\d])/);
+  if(!m) return null;
+  const toMin=(h,mm)=>{let H=parseInt(h),M=parseInt(mm||'0');if(h.length>=3&&!mm){H=Math.floor(parseInt(h)/100);M=parseInt(h)%100;}return H*60+M;};
+  // 支援 1800-1900、18:00-19:00、18-19
+  const a=m[1].length>=3?toMin(m[1]):toMin(m[1],m[2]),b=m[3].length>=3?toMin(m[3]):toMin(m[3],m[4]);
+  if(!(b>a)||a<6*60||b>24*60) return null;
+  const pad=n=>String(n).padStart(2,'0');
+  return{i:m.index,t:`${pad(Math.floor(a/60))}:${pad(a%60)}`,dur:b-a};
+}
 function findTimes(text){
   const out=[];let m;
   const adj=(h,pre)=>{ if((pre==='下午'||pre==='晚上'||pre==='傍晚')&&h<12) h+=12; if(pre==='中午'&&h<6) h+=12; if(!pre&&h>=1&&h<=7) h+=12; return h; };
@@ -1475,6 +1485,12 @@ function parseCommand(text){
     const to=after[0]||(before.length>1?before[1]:null);
     if(!to&&!tAfter.length) return{error:'請加上要調到的日期或時間，例如「調到 11/2 19:00」'};
     return{action:'move',student:st,date:from.ds,newDate:to?to.ds:null,newTime:tAfter.length?tAfter[0].t:null};
+  }
+  if(/補登|補記|補建/.test(text)){
+    if(!dates.length) return{error:'請加上日期，例如「洛禎 10/1 1800-1900 補登」'};
+    const rg=findRange(text.replace(/\d{1,2}\s*\/\s*\d{1,2}/g,m=>' '.repeat(m.length)));
+    const t=rg?rg.t:(times.length?times[0].t:(st.time?pad5(st.time):null));
+    return{action:'log',student:st,date:dates[0].ds,time:t,dur:rg?rg.dur:null};
   }
   if(/補課|約課|加課|排課/.test(text)&&!/取消/.test(text)){
     if(!dates.length) return{error:'請加上日期，例如「小明 11/5 15:00 補課」'};
@@ -1538,6 +1554,11 @@ async function runCommand(){
       c.newDate=c.newDate||p.date;c.newTime=c.newTime||p.hhmm;
       c.dur=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000)||60;
       desc=`調課 → ${fmtMD(c.newDate)} ${c.newTime}`;
+    }else if(c.action==='log'){
+      if(!c.time) return out.innerHTML=cmdMsg('請加上時間，例如「1800-1900」',true);
+      c.dur=c.dur||parseInt(s.duration||'60')||60;
+      if(evs.some(e=>!evState(e)&&evParts(e.start.dateTime).hhmm===c.time)) return out.innerHTML=cmdMsg(`${s.name} ${day} ${c.time} 已經有課了`,true);
+      desc=`補登課程 ${c.time}（${c.dur} 分，照常計薪，不算補課）`;
     }else if(c.action==='book'){
       if(!c.time) return out.innerHTML=cmdMsg('請加上時間，例如「15:00」或「下午3點」',true);
       c.dur=parseInt(s.duration||'60')||60;
@@ -1571,6 +1592,10 @@ async function execCommand(){
       if(!ev.originalStartTime&&!pr.origStart) pr.origStart=ev.start.dateTime;
       const upd=await gcal('PATCH',`/events/${ev.id}`,{start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,c.dur),timeZone:'Asia/Taipei'},extendedProperties:{private:pr}});
       if(wasOff&&upd) await markEvent(upd,'');
+    }else if(c.action==='log'){
+      const body=evBody(s,c.date,c.time,c.dur,'booking');
+      body.extendedProperties.private.logged='1';body.description='補登課程（爵士鼓教學系統）';
+      await gcal('POST','/events',body);
     }else if(c.action==='book'){
       if(await isTeacherOnLeave(c.date)) throw new Error(`${fmtMD(c.date)} 你已請假，不能排課`);
       const body=evBody(s,c.date,c.time,c.dur,'booking');
@@ -1594,7 +1619,7 @@ function cmdBoxHtml(){
     <div id="cmd-result"></div>
     <details style="margin-top:8px;"><summary style="font-size:11px;color:var(--text3);cursor:pointer;">指令範例</summary>
       <div style="font-size:11px;color:var(--text3);line-height:1.9;margin-top:4px;">
-        小明 10/31 請假<br>小明 10/31 恢復<br>小明 10/31 調到 11/2 19:00<br>小明 下週六 改到 下午3點<br>小明 11/5 15:00 補課<br>小明 11/5 取消補課<br>11/16-11/24 我請假 中國出差
+        小明 10/31 請假<br>洛禎 10/1 1800-1900 補登<br>小明 10/31 恢復<br>小明 10/31 調到 11/2 19:00<br>小明 下週六 改到 下午3點<br>小明 11/5 15:00 補課<br>小明 11/5 取消補課<br>11/16-11/24 我請假 中國出差
       </div></details>
   </div>`;
 }
