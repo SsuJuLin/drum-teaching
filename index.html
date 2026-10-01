@@ -239,6 +239,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         </div>
       </div>
       <div class="stat-row" id="stat-row"></div>
+      <div id="checkin-card"></div>
       <div id="cmd-box"></div>
       <div id="unrec-card"></div>
       <div id="gcal-panel"></div>
@@ -259,6 +260,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         <button class="more-btn" id="student-more-btn" style="margin-left:auto;font-size:22px;color:var(--text3);" onclick="">···</button>
       </div>
       <div class="detail-wrap" id="detail-wrap"></div>
+    </div>
+    <div class="page" id="page-checkins">
+      <button class="back-bar" onclick="goBack('home')">‹ 首頁</button>
+      <div style="padding:0 16px 24px;" id="checkins-wrap"></div>
     </div>
     <div class="page" id="page-todo">
       <button class="back-bar" onclick="goBack('home')">‹ 首頁</button>
@@ -518,6 +523,44 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
   </div>
 </div>
 
+<!-- CHECKIN SHEET -->
+<div class="overlay" id="sheet-checkin">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="ck-title">🕘 手動打卡</div>
+    <div class="sheet-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">地點</label><select class="form-select" id="ck-place"></select></div>
+        <div class="form-group"><label class="form-label">日期</label><input class="form-input" type="date" id="ck-date"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">上班</label><input class="form-input" type="time" id="ck-start"></div>
+        <div class="form-group"><label class="form-label">下班</label><input class="form-input" type="time" id="ck-end"></div>
+      </div>
+      <button id="ck-del" class="btn-cancel" style="width:100%;color:var(--red);" onclick="deleteCheckin()">刪除這筆打卡</button>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-checkin')">取消</button>
+      <button class="btn-save" onclick="saveCheckinEdit()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- PLACES SHEET -->
+<div class="overlay" id="sheet-places">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">📍 教室位置</div>
+    <div class="sheet-body">
+      <div style="font-size:12px;color:var(--text3);margin:-6px 0 12px;line-height:1.6;">人在教室時按「設為目前位置」。設定後，當天有課又在附近（約 300 公尺）打開網站，就會自動打卡。</div>
+      <div id="places-list"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" style="flex:1;" onclick="closeSheet('sheet-places')">完成</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -697,14 +740,14 @@ function gcalConnect(){
 }
 function gcalClear(){gToken=null;gExp=0;try{localStorage.removeItem('gcal_token');}catch(e){}}
 function onGcalChange(){
-  if(curPage==='home') Promise.all([loadWeek(),loadToday(),loadReminder()]).then(renderHome);
+  if(curPage==='home') Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]).then(()=>{renderHome();autoCheckin(true);});
   if(curPage==='leaves') renderLeaves();
   if(curPage==='schedule') renderSchedule();
   if(curPage==='detail'&&curStudent) renderDetail(curStudent);
 }
-async function gcal(method,path,body,query){
+async function gcal(method,path,body,query,cal){
   if(!gcalValid()) throw new Error('Google 日曆未連接或已過期，請重新連接');
-  let url=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GCAL_ID)}${path}`;
+  let url=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal||GCAL_ID)}${path}`;
   if(query) url+='?'+new URLSearchParams(query).toString();
   const opts={method,headers:{'Authorization':`Bearer ${gToken}`}};
   if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
@@ -1770,6 +1813,267 @@ function unrecHtml(){
   return html;
 }
 
+// ══════════ 上班打卡（存在「打卡紀錄」日曆）══════════
+const CHECKIN_CAL_ID='fe01dd3873fbf548161b89997bf1197364b1f9ba9503547f1d41b90eb8379522@group.calendar.google.com';
+const PLACES=['楊梅宏音 Yamaha','林口星玥','內壢奧莉琪','藝文鹿納','泰順錄音室'];
+function ck(method,path,body,query){return gcal(method,path,body,query,CHECKIN_CAL_ID);}
+let placeCoords={},settingsEv=null,todayChecks=null,todayChecksKey=null;
+async function loadCheckinSettings(){
+  try{
+    const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=settings'],['maxResults','5']]);
+    settingsEv=(d&&d.items||[]).find(e=>e.status!=='cancelled')||null;
+    placeCoords={};
+    const pr=settingsEv?.extendedProperties?.private||{};
+    PLACES.forEach((p,i)=>{const v=pr['p'+i];if(v){const[a,b]=v.split(',').map(Number);if(!isNaN(a))placeCoords[p]={lat:a,lng:b};}});
+  }catch(e){console.error(e);}
+}
+async function savePlaceCoords(){
+  const pr={kind:'settings'};
+  PLACES.forEach((p,i)=>{if(placeCoords[p])pr['p'+i]=`${placeCoords[p].lat.toFixed(6)},${placeCoords[p].lng.toFixed(6)}`;});
+  if(settingsEv) settingsEv=await ck('PATCH',`/events/${settingsEv.id}`,{extendedProperties:{private:pr}});
+  else settingsEv=await ck('POST','/events',{summary:'⚙️ 打卡設定（請勿刪除）',start:{date:'2020-01-01'},end:{date:'2020-01-02'},transparency:'transparent',extendedProperties:{private:pr}});
+}
+async function loadTodayChecks(){
+  if(!gcalValid()){todayChecks=null;return;}
+  const td=twToday();
+  try{
+    const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(td,'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime']]);
+    todayChecks=(d&&d.items||[]).filter(e=>e.status!=='cancelled');todayChecksKey=td;
+  }catch(e){todayChecks=null;console.error(e);}
+}
+function lessonPlace(e){
+  const pr=e.extendedProperties?.private||{};
+  const room=isSub(e)?(pr.room||''):(students.find(s=>s.id===pr.studentId)?.room||'');
+  if(!room) return '';
+  return PLACES.find(p=>p===room||room.includes(p.slice(0,2)))||room;
+}
+// 今天每個地點的上課時段（第一堂開始～最後一堂結束）
+function todayPlaceSpans(){
+  const td=twToday();const m={};
+  (todayEvents||[]).filter(e=>evParts(e.start.dateTime).date===td&&!evState(e)).forEach(e=>{
+    const p=lessonPlace(e);if(!p)return;
+    const st=new Date(e.start.dateTime).getTime(),en=new Date(e.end.dateTime).getTime();
+    if(!m[p]) m[p]={place:p,start:st,end:en,count:0};
+    m[p].start=Math.min(m[p].start,st);m[p].end=Math.max(m[p].end,en);m[p].count++;
+  });
+  return Object.values(m).sort((a,b)=>a.start-b.start);
+}
+function checkedPlace(p){return (todayChecks||[]).find(e=>e.extendedProperties?.private?.place===p);}
+function hhmmOf(ms){return evParts(new Date(ms).toISOString()).hhmm;}
+function isoTW(ms){return new Date(ms+TW_MS).toISOString().slice(0,19)+'+08:00';}
+async function createCheckin(place,startMs,endMs,how){
+  if(endMs<=startMs) endMs=startMs+60*60000;
+  await ck('POST','/events',{
+    summary:`📍 ${place}`,location:place,description:how,
+    start:{dateTime:isoTW(startMs),timeZone:'Asia/Taipei'},end:{dateTime:isoTW(endMs),timeZone:'Asia/Taipei'},
+    extendedProperties:{private:{kind:'checkin',place,how}},
+  });
+}
+function distM(a,b){
+  const R=6371000,toR=x=>x*Math.PI/180;
+  const dLat=toR(b.lat-a.lat),dLng=toR(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function getPos(){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation) return rej(new Error('這個瀏覽器不支援定位'));
+    navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
+      e=>rej(new Error(e.code===1?'沒有定位權限，請在設定允許網站使用位置':'無法取得位置')),{enableHighAccuracy:true,timeout:12000,maximumAge:60000});
+  });
+}
+let nearPlace=null,autoBusy=false,lastAuto=0;
+async function autoCheckin(force){
+  if(autoBusy||!gcalValid()||!Object.keys(placeCoords).length) return;
+  if(!force&&Date.now()-lastAuto<5*60000) return;
+  autoBusy=true;lastAuto=Date.now();
+  try{
+    if(todayChecksKey!==twToday()) await loadTodayChecks();
+    const pos=await getPos();
+    nearPlace=null;
+    let best=null;
+    Object.entries(placeCoords).forEach(([p,c])=>{const d=distM(pos,c);if(d<=300+Math.min(pos.acc||0,200)&&(!best||d<best.d))best={p,d};});
+    if(best){
+      nearPlace=best.p;
+      const span=todayPlaceSpans().find(x=>x.place===best.p);
+      if(span&&!checkedPlace(best.p)){
+        const now=Date.now();
+        await createCheckin(best.p,now,Math.max(span.end,now+30*60000),'自動打卡');
+        await loadTodayChecks();
+        showToast(`📍 已自動打卡・${best.p.replace(' Yamaha','')} ${hhmmOf(now)}`);
+      }
+    }
+  }catch(e){console.warn('autoCheckin',e.message);}
+  autoBusy=false;
+  if(curPage==='home') renderHome();
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&NOTION_TOKEN&&gcalValid())autoCheckin();});
+
+async function quickCheckin(place,mode){
+  const span=todayPlaceSpans().find(x=>x.place===place);
+  const now=Date.now();
+  try{
+    if(mode==='late'&&span) await createCheckin(place,span.start,span.end,'補打卡');
+    else await createCheckin(place,now,span?Math.max(span.end,now+30*60000):now+60*60000,'手動打卡');
+    await loadTodayChecks();showToast(`✅ 已打卡・${place.replace(' Yamaha','')}`);
+  }catch(e){showToast('❌ '+e.message);}
+  if(curPage==='home') renderHome();
+}
+async function checkout(evId){
+  try{
+    const now=Date.now();
+    await ck('PATCH',`/events/${evId}`,{end:{dateTime:isoTW(now),timeZone:'Asia/Taipei'}});
+    await loadTodayChecks();showToast(`✅ 下班 ${hhmmOf(now)}`);
+  }catch(e){showToast('❌ '+e.message);}
+  if(curPage==='home') renderHome();
+  if(curPage==='checkins') renderCheckins();
+}
+function checkinHtml(){
+  if(!gcalValid()||todayChecksKey!==twToday()||!todayChecks) return '';
+  const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
+  const now=Date.now();
+  const spans=todayPlaceSpans();
+  const missing=spans.filter(s=>!checkedPlace(s.place)&&now>s.start+10*60000);
+  let h='';
+  missing.forEach(s=>{
+    h+=`<div style="${box}border-color:rgba(196,106,106,0.6);display:flex;align-items:center;gap:8px;">
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--red);font-weight:700;">⚠️ ${s.place.replace(' Yamaha','')} 有課但還沒打卡</div>
+      <button style="${smallBtn('var(--text)')}" onclick="quickCheckin('${s.place}','late')">補打卡 ${hhmmOf(s.start)}</button></div>`;
+  });
+  const rows=(todayChecks||[]).map(e=>{
+    const a=evParts(e.start.dateTime).hhmm,b=evParts(e.end.dateTime).hhmm;
+    const hrs=((new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000).toFixed(1);
+    const p=e.extendedProperties?.private||{};
+    return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;">
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--text);">📍 ${(p.place||'').replace(' Yamaha','')} <span style="color:var(--text3);font-size:11px;">${a}–${b}・${hrs}h${p.how==='自動打卡'?'・自動':''}</span></div>
+      <button style="${smallBtn('var(--text2)')}" onclick="checkout('${e.id}')">下班</button>
+      <button style="${smallBtn('var(--text3)')}" onclick="openCheckinEdit('${e.id}')">改</button></div>`;
+  }).join('');
+  const suggest=nearPlace&&!checkedPlace(nearPlace)?`<button style="${smallBtn('var(--accent)')}" onclick="quickCheckin('${nearPlace}')">📍 在${nearPlace.replace(' Yamaha','')}打卡</button>`:'';
+  const noCoords=!Object.keys(placeCoords).length;
+  h+=`<div style="${box}">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--text2);white-space:nowrap;">🕘 今日打卡${(todayChecks||[]).length?'':'・<span style="color:var(--text3);">尚未打卡</span>'}</div>
+      <button style="${smallBtn('var(--text2)')}" onclick="openCheckinEdit()">＋ 手動</button>
+      <button style="${smallBtn('var(--text3)')}" onclick="showPage('checkins')">紀錄 ›</button>
+    </div>
+    ${suggest?`<div style="margin-top:8px;">${suggest}</div>`:''}
+    ${rows?`<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:4px;">${rows}</div>`:''}
+    ${noCoords?`<div style="font-size:11px;color:var(--text3);margin-top:8px;">還沒設定教室位置，無法自動打卡・<span style="color:var(--accent);cursor:pointer;" onclick="openPlaces()">去設定</span></div>`:''}
+  </div>`;
+  return h;
+}
+// ── 教室位置設定 ──
+function openPlaces(){
+  renderPlaces();document.getElementById('sheet-places').classList.add('show');
+}
+function renderPlaces(){
+  document.getElementById('places-list').innerHTML=PLACES.map(p=>{
+    const c=placeCoords[p];
+    return`<div class="rec-card" style="display:flex;align-items:center;gap:8px;padding:10px 12px;margin-bottom:6px;">
+      <div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:700;color:var(--text);">${p}</div>
+      <div style="font-size:11px;color:${c?'var(--accent)':'var(--text3)'};">${c?'✅ 已設定':'未設定'}</div></div>
+      <button style="${smallBtn('var(--accent)')}" onclick="setPlaceHere('${p}')">設為目前位置</button>
+      ${c?`<button style="${smallBtn('var(--text3)')}" onclick="clearPlace('${p}')">清除</button>`:''}</div>`;
+  }).join('');
+}
+async function setPlaceHere(p){
+  showToast('📡 取得位置中…');
+  try{const pos=await getPos();placeCoords[p]={lat:pos.lat,lng:pos.lng};await savePlaceCoords();renderPlaces();
+    showToast(`✅ ${p} 位置已設定（誤差約 ${Math.round(pos.acc)} 公尺）`);}
+  catch(e){showToast('❌ '+e.message);}
+}
+async function clearPlace(p){delete placeCoords[p];try{await savePlaceCoords();renderPlaces();}catch(e){showToast('❌ '+e.message);}}
+// ── 手動打卡 / 修改 ──
+let ckEditId=null;
+async function openCheckinEdit(evId){
+  ckEditId=evId||null;
+  const sel=document.getElementById('ck-place');
+  sel.innerHTML=PLACES.map(p=>`<option>${p}</option>`).join('');
+  document.getElementById('ck-del').style.display=evId?'':'none';
+  document.getElementById('ck-title').textContent=evId?'🕘 修改打卡':'🕘 手動打卡';
+  if(evId){
+    const e=(todayChecks||[]).concat(monthChecks||[]).find(x=>x.id===evId)||await ck('GET',`/events/${evId}`);
+    sel.value=e.extendedProperties?.private?.place||PLACES[0];
+    const a=evParts(e.start.dateTime),b=evParts(e.end.dateTime);
+    document.getElementById('ck-date').value=a.date;document.getElementById('ck-start').value=a.hhmm;document.getElementById('ck-end').value=b.hhmm;
+  }else{
+    const now=Date.now();
+    sel.value=nearPlace||todayPlaceSpans()[0]?.place||PLACES[0];
+    document.getElementById('ck-date').value=twToday();document.getElementById('ck-start').value=hhmmOf(now);
+    const sp=todayPlaceSpans().find(x=>x.place===sel.value);
+    document.getElementById('ck-end').value=hhmmOf(sp?Math.max(sp.end,now+30*60000):now+60*60000);
+  }
+  document.getElementById('sheet-checkin').classList.add('show');
+}
+async function saveCheckinEdit(){
+  const place=document.getElementById('ck-place').value,ds=document.getElementById('ck-date').value;
+  const a=document.getElementById('ck-start').value,b=document.getElementById('ck-end').value;
+  if(!ds||!a||!b){showToast('請填完整時間');return;}
+  let st=new Date(twISO(ds,a)).getTime(),en=new Date(twISO(ds,b)).getTime();
+  if(en<=st) en+=24*3600000;
+  try{
+    if(ckEditId) await ck('PATCH',`/events/${ckEditId}`,{summary:`📍 ${place}`,location:place,start:{dateTime:isoTW(st),timeZone:'Asia/Taipei'},end:{dateTime:isoTW(en),timeZone:'Asia/Taipei'},extendedProperties:{private:{kind:'checkin',place,how:'手動修改'}}});
+    else await createCheckin(place,st,en,'手動打卡');
+    closeSheet('sheet-checkin');showToast('✅ 已儲存');
+    await loadTodayChecks();if(curPage==='home')renderHome();if(curPage==='checkins')renderCheckins();
+  }catch(e){showToast('❌ '+e.message);}
+}
+function deleteCheckin(){
+  if(!ckEditId)return;
+  showConfirm('刪除打卡','確定刪除這筆打卡紀錄？',async()=>{
+    try{await ck('DELETE',`/events/${ckEditId}`);closeSheet('sheet-checkin');showToast('✅ 已刪除');
+      await loadTodayChecks();if(curPage==='home')renderHome();if(curPage==='checkins')renderCheckins();}
+    catch(e){showToast('❌ '+e.message);}
+  });
+}
+// ── 打卡紀錄頁（月份統計）──
+let ckMonthOff=0,monthChecks=null;
+function shiftCkMonth(n){ckMonthOff+=n;renderCheckins();}
+async function renderCheckins(){
+  const wrap=document.getElementById('checkins-wrap');
+  if(!gcalValid()){wrap.innerHTML=`<div class="rec-empty">請先連接 Google 日曆</div>`;return;}
+  const td=twToday();let y=parseInt(td.slice(0,4)),m=parseInt(td.slice(5,7))+ckMonthOff;
+  while(m<1){m+=12;y--;}while(m>12){m-=12;y++;}
+  const first=`${y}-${String(m).padStart(2,'0')}-01`;
+  const next=m===12?`${y+1}-01-01`:`${y}-${String(m+1).padStart(2,'0')}-01`;
+  const nb='background:var(--card);border:1px solid var(--border2);color:var(--text2);border-radius:14px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit;';
+  const head=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+    <button style="${nb}" onclick="shiftCkMonth(-1)">‹</button>
+    <div style="flex:1;text-align:center;font-size:15px;font-weight:800;color:var(--text);">${y} 年 ${m} 月</div>
+    <button style="${nb}" onclick="shiftCkMonth(1)">›</button></div>`;
+  wrap.innerHTML=head+`<div class="rec-empty">讀取中…</div>`;
+  try{
+    const [c,l]=await Promise.all([
+      ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(first,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','500']]),
+      gcal('GET','/events',null,[['timeMin',twISO(first,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
+    ]);
+    monthChecks=(c&&c.items||[]).filter(e=>e.status!=='cancelled');
+    const lessons=(l&&l.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&!evState(e)&&(e.extendedProperties?.private?.studentId||isSub(e)));
+    const sum={};
+    monthChecks.forEach(e=>{const p=e.extendedProperties?.private?.place||'?';(sum[p]=sum[p]||{h:0,days:0,lessons:0,mins:0,subs:0});sum[p].h+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000;sum[p].days++;});
+    lessons.forEach(e=>{const p=lessonPlace(e)||'其他';(sum[p]=sum[p]||{h:0,days:0,lessons:0,mins:0,subs:0});
+      if(isSub(e)) sum[p].subs++; else sum[p].lessons++;
+      sum[p].mins+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000;});
+    const tot=Object.values(sum).reduce((a,x)=>a+x.h,0);
+    let html=`<div class="rec-card" style="padding:12px;margin-bottom:14px;">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:8px;">本月打卡 <b style="color:var(--text);">${monthChecks.length}</b> 次・共 <b style="color:var(--text);">${tot.toFixed(1)}</b> 小時</div>
+      ${Object.entries(sum).map(([p,x])=>`<div style="display:flex;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid var(--border);">
+        <div style="flex:1;color:var(--text);">${p.replace(' Yamaha','')}</div>
+        <div style="color:var(--text3);">打卡 ${x.days} 天・${x.h.toFixed(1)}h</div>
+        <div style="color:var(--text3);">上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${(x.mins/60).toFixed(1)}h</div></div>`).join('')}
+    </div>`;
+    html+=monthChecks.length?[...monthChecks].reverse().map(e=>{
+      const a=evParts(e.start.dateTime),b=evParts(e.end.dateTime);const p=e.extendedProperties?.private||{};
+      return`<div class="rec-card" onclick="openCheckinEdit('${e.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;margin-bottom:6px;cursor:pointer;">
+        <div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:700;color:var(--text);">${fmtMD(a.date)}・${(p.place||'').replace(' Yamaha','')}</div>
+        <div style="font-size:11px;color:var(--text3);">${a.hhmm}–${b.hhmm}・${((new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000).toFixed(1)}h・${p.how||''}</div></div>
+        <div style="color:var(--text3);">›</div></div>`;}).join(''):`<div class="rec-empty">這個月還沒有打卡紀錄</div>`;
+    html+=`<div style="text-align:center;margin-top:14px;"><button style="${smallBtn('var(--text2)')}" onclick="openPlaces()">📍 設定教室位置</button></div>`;
+    wrap.innerHTML=head+html;
+  }catch(e){wrap.innerHTML=head+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -1847,7 +2151,7 @@ async function refreshAll(){
   try{
     weekKey=null;todayKey=null;
     await Promise.all([loadStudents(),loadRecords()]);
-    if(gcalValid()) await Promise.all([loadWeek(),loadToday(),loadReminder()]);
+    if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);autoCheckin(true);}
     if(curPage==='home') renderHome();
     showToast('✅ 已更新');
   }catch(e){showToast('❌ 更新失敗：'+e.message);}
@@ -1863,15 +2167,16 @@ function showPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
-  const titles={home:'首頁',schedule:'本週排課',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄'};
+  const titles={home:'首頁',schedule:'本週排課',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(id==='students'){btn.textContent='＋ 學生';btn.onclick=()=>openAddStudent();}
-  else if(id==='detail'||id==='classroom'||id==='leaves'||id==='todo'){btn.style.display='none';}
+  else if(id==='detail'||id==='classroom'||id==='leaves'||id==='todo'||id==='checkins'){btn.style.display='none';}
   else{btn.style.display='';btn.textContent='＋ 紀錄';btn.onclick=()=>openAddRecord();}
   if(id==='home'){renderHome();if(gcalValid()&&todayKey!==twToday())loadToday().then(()=>{if(curPage==='home')renderHome();});}
   if(id==='leaves') renderLeaves();
   if(id==='todo') renderTodo();
+  if(id==='checkins') renderCheckins();
   if(id==='schedule') renderSchedule();
   if(id==='students') renderStudents();
   document.getElementById('main-content').scrollTop=0;
@@ -1898,6 +2203,7 @@ function renderHome(){
     <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
   document.getElementById('gcal-panel').innerHTML=NOTION_TOKEN?gcalPanelHtml():'';
   document.getElementById('unrec-card').innerHTML=NOTION_TOKEN?unrecHtml():'';
+  document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
   const cb=document.getElementById('cmd-box');
   if(!NOTION_TOKEN||!gcalValid()) cb.innerHTML='';
   else if(!document.getElementById('cmd-input')) cb.innerHTML=cmdBoxHtml();
@@ -2464,13 +2770,14 @@ async function init(){
     document.getElementById('gcal-panel').innerHTML='';
     document.getElementById('unrec-card').innerHTML='';
     document.getElementById('cmd-box').innerHTML='';
+    document.getElementById('checkin-card').innerHTML='';
     return;
   }
   document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
   try{
     await Promise.all([loadStudents(),loadRecords()]);
     renderHome();
-    if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder()]);renderHome();}
+    if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);renderHome();autoCheckin(true);}
     showToast('✅ 已連接 Notion');
   }catch(e){
     document.getElementById('stat-row').innerHTML=`<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--red);">❌ 無法連接 Notion<br><small>${e.message}</small></div>`;
