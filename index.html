@@ -261,6 +261,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       </div>
       <div class="detail-wrap" id="detail-wrap"></div>
     </div>
+    <div class="page" id="page-salary">
+      <button class="back-bar" onclick="goBack('home')">‹ 首頁</button>
+      <div style="padding:0 16px 24px;" id="salary-wrap"></div>
+    </div>
     <div class="page" id="page-checkins">
       <button class="back-bar" onclick="goBack('home')">‹ 首頁</button>
       <div style="padding:0 16px 24px;" id="checkins-wrap"></div>
@@ -561,6 +565,51 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
   </div>
 </div>
 
+<!-- PAID SHEET -->
+<div class="overlay" id="sheet-paid">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="paid-title">💰 入帳</div>
+    <div class="sheet-body">
+      <div id="paid-due" style="font-size:13px;color:var(--text3);margin:-6px 0 12px;"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">實收金額</label><input class="form-input" type="number" inputmode="numeric" id="paid-amount"></div>
+        <div class="form-group"><label class="form-label">入帳日期</label><input class="form-input" type="date" id="paid-date"></div>
+      </div>
+      <div class="form-group"><label class="form-label">備註</label><input class="form-input" id="paid-note" placeholder="例：少算一堂，已反映"></div>
+      <button id="paid-del" class="btn-cancel" style="width:100%;color:var(--red);" onclick="deletePaid()">刪除這筆入帳</button>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-paid')">取消</button>
+      <button class="btn-save" onclick="savePaid()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- INCOME SHEET -->
+<div class="overlay" id="sheet-income">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">➕ 獎金／錄音案子／其他</div>
+    <div class="sheet-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">類型</label><select class="form-select" id="inc-type"><option>錄音案子</option><option>獎金</option><option>其他收入</option></select></div>
+        <div class="form-group"><label class="form-label">地點</label><select class="form-select" id="inc-place"></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">金額</label><input class="form-input" type="number" inputmode="numeric" id="inc-amount"></div>
+        <div class="form-group"><label class="form-label">日期</label><input class="form-input" type="date" id="inc-date"></div>
+      </div>
+      <div class="form-group"><label class="form-label">名稱</label><input class="form-input" id="inc-name" placeholder="例：某某樂團 錄音"></div>
+      <div class="form-group"><label class="form-label">備註</label><input class="form-input" id="inc-note"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-income')">取消</button>
+      <button class="btn-save" onclick="saveIncome()">✅ 新增</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -642,6 +691,7 @@ async function loadStudents(){
     duration:gp(p,'上課時長','rich_text')||'60',
     status:gp(p,'狀態','select'),
     booking:gp(p,'排課方式','select')||'每週固定',
+    rate:gp(p,'特別時薪','number')||0,
     note:gp(p,'備註','rich_text'),
     photo:gp(p,'照片','files'),
     color:COLORS[i%COLORS.length],
@@ -1956,6 +2006,7 @@ function checkinHtml(){
       <div style="flex:1;min-width:0;font-size:13px;color:var(--text2);white-space:nowrap;">🕘 今日打卡${(todayChecks||[]).length?'':'・<span style="color:var(--text3);">尚未打卡</span>'}</div>
       <button style="${smallBtn('var(--text2)')}" onclick="openCheckinEdit()">＋ 手動</button>
       <button style="${smallBtn('var(--text3)')}" onclick="showPage('checkins')">紀錄 ›</button>
+      <button style="${smallBtn('var(--accent)')}" onclick="showPage('salary')">💰 薪資</button>
     </div>
     ${suggest?`<div style="margin-top:8px;">${suggest}</div>`:''}
     ${rows?`<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:4px;">${rows}</div>`:''}
@@ -2074,6 +2125,182 @@ async function renderCheckins(){
   }catch(e){wrap.innerHTML=head+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
 }
 
+// ══════════ 薪資統計 ══════════
+const DB_SALARY=''; // ← 「薪資紀錄」資料庫 ID（貼上網址後填入）
+const PAY_RULES={
+  '林口星玥':{rate:600,payDay:10},
+  '楊梅宏音 Yamaha':{rate:455,payDay:1},
+  '內壢奧莉琪':{rate:350,payDay:15},
+  '藝文鹿納':{rate:500,per4:true},
+  '泰順錄音室':{manual:true},
+};
+async function gcalAll(query,cal){
+  let items=[],token=null,guard=0;
+  do{
+    const q=[...query];if(token)q.push(['pageToken',token]);
+    const d=await gcal('GET','/events',null,q,cal);
+    items=items.concat(d&&d.items||[]);token=d&&d.nextPageToken;
+  }while(token&&++guard<20);
+  return items;
+}
+async function querySalary(){
+  if(!DB_SALARY) return [];
+  let out=[],cursor=null,guard=0;
+  do{
+    const body={page_size:100};if(cursor)body.start_cursor=cursor;
+    const d=await notionAPI('POST',`/databases/${DB_SALARY}/query`,body);
+    out=out.concat(d.results||[]);cursor=d.has_more?d.next_cursor:null;
+  }while(cursor&&++guard<20);
+  return out.map(p=>({id:p.id,name:gp(p,'名稱','title'),date:gp(p,'日期','date'),place:gp(p,'地點','select'),type:gp(p,'類型','select'),amount:gp(p,'金額','number'),note:gp(p,'備註','rich_text')}));
+}
+function lessonRate(e,place){
+  const rule=PAY_RULES[place];if(!rule||!rule.rate) return 0;
+  if(isSub(e)) return rule.rate;
+  const s=students.find(x=>x.id===e.extendedProperties?.private?.studentId);
+  return s&&s.rate?s.rate:rule.rate;
+}
+function lessonPay(e,place){return Math.round(lessonRate(e,place)*(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000);}
+let salaryOff=0,salaryRows=[];
+function shiftSalary(n){salaryOff+=n;renderSalary();}
+function monthKey(y,m){return `${y}/${String(m).padStart(2,'0')}`;}
+async function renderSalary(){
+  const wrap=document.getElementById('salary-wrap');
+  if(!gcalValid()){wrap.innerHTML=`<div class="rec-empty">請先連接 Google 日曆</div>`;return;}
+  const td=twToday();let y=parseInt(td.slice(0,4)),m=parseInt(td.slice(5,7))+salaryOff;
+  while(m<1){m+=12;y--;}while(m>12){m-=12;y++;}
+  const first=`${y}-${String(m).padStart(2,'0')}-01`;
+  const next=m===12?`${y+1}-01-01`:`${y}-${String(m+1).padStart(2,'0')}-01`;
+  const nm=m===12?1:m+1,ny=m===12?y+1:y;
+  const mk=monthKey(y,m);
+  const nb='background:var(--card);border:1px solid var(--border2);color:var(--text2);border-radius:14px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit;';
+  const head=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+    <button style="${nb}" onclick="shiftSalary(-1)">‹</button>
+    <div style="flex:1;text-align:center;font-size:15px;font-weight:800;color:var(--text);">${y} 年 ${m} 月的薪資</div>
+    <button style="${nb}" onclick="shiftSalary(1)">›</button></div>`;
+  wrap.innerHTML=head+`<div class="rec-empty">計算中…</div>`;
+  try{
+    const startAll='2025-01-01';
+    const [lessonsAll,rows]=await Promise.all([
+      gcalAll([['timeMin',twISO(startAll,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
+      querySalary().catch(e=>{console.error(e);return[];}),
+    ]);
+    salaryRows=rows;
+    const lessons=lessonsAll.filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&!evState(e)&&(e.extendedProperties?.private?.studentId||isSub(e))&&new Date(e.end.dateTime).getTime()<=Date.now()+0*1);
+    const inMonth=e=>{const d=evParts(e.start.dateTime).date;return d>=first&&d<next;};
+    const places={};
+    const P=p=>places[p]=places[p]||{place:p,lessons:0,subs:0,hours:0,pay:0,extra:[],per4:[]};
+    // 一般教室：當月上過的課
+    lessons.filter(inMonth).forEach(e=>{
+      const pl=lessonPlace(e);const rule=PAY_RULES[pl];if(!rule||rule.per4||rule.manual)return;
+      const x=P(pl);isSub(e)?x.subs++:x.lessons++;x.hours+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000;x.pay+=lessonPay(e,pl);
+    });
+    // 藝文：每位學生各自滿四堂發一次（依日曆紀錄累計）
+    const per4Place=Object.keys(PAY_RULES).find(k=>PAY_RULES[k].per4);
+    if(per4Place){
+      const by={};
+      lessons.filter(e=>lessonPlace(e)===per4Place).forEach(e=>{const k=isSub(e)?'代:'+(e.extendedProperties.private.subStudent||''):e.extendedProperties.private.studentId;(by[k]=by[k]||[]).push(e);});
+      const x={place:per4Place,lessons:0,subs:0,hours:0,pay:0,extra:[],per4:[]};
+      Object.entries(by).forEach(([k,arr])=>{
+        arr.sort((a,b)=>a.start.dateTime<b.start.dateTime?-1:1);
+        const name=k.startsWith('代:')?k.slice(2)+'（代）':(students.find(s=>s.id===k)?.name||'?');
+        for(let i=3;i<arr.length;i+=4){
+          const done=arr[i];if(!inMonth(done))continue;
+          const grp=arr.slice(i-3,i+1);const pay=grp.reduce((a,e)=>a+lessonPay(e,per4Place),0);
+          x.lessons+=4;x.hours+=grp.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);x.pay+=pay;
+          x.per4.push({name,date:evParts(done.start.dateTime).date,pay});
+        }
+        const prog=arr.length%4;
+        if(prog&&evParts(arr[arr.length-1].start.dateTime).date>=first) x.per4.push({name,progress:prog});
+      });
+      if(x.per4.length||x.pay) places[per4Place]=x;
+    }
+    // Notion：獎金、錄音案子、其他收入（依日期歸月）
+    rows.filter(r=>r.type&&r.type!=='入帳'&&r.date&&r.date>=first&&r.date<next).forEach(r=>{const x=P(r.place||'其他');x.pay+=r.amount||0;x.extra.push(r);});
+    const order=[...Object.keys(PAY_RULES),'其他'];
+    const list=Object.values(places).sort((a,b)=>order.indexOf(a.place)-order.indexOf(b.place));
+    const total=list.reduce((a,x)=>a+x.pay,0);
+    const paidRows=rows.filter(r=>r.type==='入帳'&&(r.name||'').startsWith(mk));
+    const paidTotal=paidRows.reduce((a,r)=>a+(r.amount||0),0);
+    const money=n=>'$'+Math.round(n).toLocaleString();
+    let html=`<div class="rec-card" style="padding:14px;margin-bottom:14px;">
+      <div style="font-size:12px;color:var(--text3);">應領合計${salaryOff===0?'（只算已上完的課）':''}</div>
+      <div style="font-size:26px;font-weight:900;color:var(--accent);margin:2px 0;">${money(total)}</div>
+      <div style="font-size:12px;color:var(--text3);">已入帳 ${money(paidTotal)}${total-paidTotal>0?`・未入帳 ${money(total-paidTotal)}`:''}</div>
+      ${DB_SALARY?`<button class="add-rec-btn" style="margin-top:10px;" onclick="openIncome()">＋ 獎金／錄音案子／其他</button>`:`<div style="font-size:11px;color:#c8a84a;margin-top:8px;">尚未連接 Notion「薪資紀錄」資料庫，入帳與額外收入暫時無法記錄</div>`}
+    </div>`;
+    if(!list.length) html+=`<div class="rec-empty">這個月沒有收入紀錄</div>`;
+    list.forEach(x=>{
+      const rule=PAY_RULES[x.place]||{};
+      const paid=paidRows.filter(r=>r.place===x.place).reduce((a,r)=>a+(r.amount||0),0);
+      const paidR=paidRows.find(r=>r.place===x.place);
+      const due=rule.payDay?`預計 ${ny}/${nm}/${rule.payDay} 發薪`:rule.per4?'每位學生滿四堂發':'手動';
+      const diff=paidR?paid-x.pay:0;
+      html+=`<div class="rec-card" style="padding:12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:baseline;gap:8px;">
+          <div style="flex:1;font-size:15px;font-weight:800;color:var(--text);">${x.place.replace(' Yamaha','')}</div>
+          <div style="font-size:16px;font-weight:800;color:var(--text);">${money(x.pay)}</div></div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${x.lessons||x.subs?`上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${x.hours.toFixed(1)} 小時${rule.rate?`・時薪 ${rule.rate}`:''}・`:''}${due}</div>
+        ${x.per4.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.per4.map(p=>p.progress?`<span style="color:var(--text3);">${esc(p.name)} 進度 ${p.progress}/4</span>`:`✅ ${esc(p.name)} 滿四堂（${mdShort(p.date)}）${money(p.pay)}`).join('<br>')}</div>`:''}
+        ${x.extra.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.extra.map(r=>`＋ ${esc(r.type)}${r.name?'・'+esc(r.name):''} ${money(r.amount||0)}`).join('<br>')}</div>`:''}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+          <div style="flex:1;font-size:12px;color:${paidR?(diff===0?'var(--accent)':'#c8a84a'):'var(--text3)'};">${paidR?`✅ 已入帳 ${money(paid)}（${mdShort(paidR.date||'')}）${diff?`・差額 ${diff>0?'+':''}${money(diff)}`:''}`:'尚未入帳'}</div>
+          ${DB_SALARY?(paidR?`<button style="${smallBtn('var(--text3)')}" onclick="openPaid('${x.place}',${x.pay},'${mk}','${paidR.id}')">修改</button>`:`<button style="${smallBtn('var(--accent)')}" onclick="openPaid('${x.place}',${x.pay},'${mk}')">已入帳</button>`):''}
+        </div></div>`;
+    });
+    wrap.innerHTML=head+html;
+  }catch(e){wrap.innerHTML=head+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
+}
+// ── 入帳 ──
+let paidCtx=null;
+function openPaid(place,due,mk,rowId){
+  const r=rowId?salaryRows.find(x=>x.id===rowId):null;
+  paidCtx={place,mk,rowId};
+  document.getElementById('paid-title').textContent=`💰 ${mk} ${place.replace(' Yamaha','')} 入帳`;
+  document.getElementById('paid-due').textContent=`應領 $${Math.round(due).toLocaleString()}`;
+  document.getElementById('paid-amount').value=r?r.amount:Math.round(due);
+  document.getElementById('paid-date').value=r?.date||twToday();
+  document.getElementById('paid-note').value=r?.note||'';
+  document.getElementById('paid-del').style.display=rowId?'':'none';
+  document.getElementById('sheet-paid').classList.add('show');
+}
+function salaryProps(o){
+  const p={'名稱':{title:[{text:{content:o.name||''}}]},'類型':{select:{name:o.type}},'金額':{number:Number(o.amount)||0},'備註':{rich_text:[{text:{content:o.note||''}}]}};
+  if(o.date) p['日期']={date:{start:o.date}};
+  if(o.place) p['地點']={select:{name:o.place}};
+  return p;
+}
+async function savePaid(){
+  const c=paidCtx;if(!c)return;
+  const o={name:`${c.mk} ${c.place}`,type:'入帳',amount:document.getElementById('paid-amount').value,date:document.getElementById('paid-date').value,note:document.getElementById('paid-note').value.trim(),place:c.place};
+  try{
+    if(c.rowId) await notionAPI('PATCH',`/pages/${c.rowId}`,{properties:salaryProps(o)});
+    else await notionAPI('POST','/pages',{parent:{database_id:DB_SALARY},properties:salaryProps(o)});
+    closeSheet('sheet-paid');showToast('✅ 已記錄入帳');renderSalary();
+  }catch(e){showToast('❌ '+e.message);}
+}
+function deletePaid(){
+  if(!paidCtx?.rowId)return;
+  showConfirm('刪除入帳','確定刪除這筆入帳紀錄？',async()=>{
+    try{await notionAPI('PATCH',`/pages/${paidCtx.rowId}`,{archived:true});closeSheet('sheet-paid');showToast('✅ 已刪除');renderSalary();}
+    catch(e){showToast('❌ '+e.message);}
+  });
+}
+// ── 獎金／錄音案子／其他 ──
+function openIncome(){
+  document.getElementById('inc-date').value=twToday();
+  document.getElementById('inc-type').value='錄音案子';
+  document.getElementById('inc-place').innerHTML=[...Object.keys(PAY_RULES),'其他'].map(p=>`<option>${p}</option>`).join('');
+  document.getElementById('inc-place').value='泰順錄音室';
+  document.getElementById('inc-name').value='';document.getElementById('inc-amount').value='';document.getElementById('inc-note').value='';
+  document.getElementById('sheet-income').classList.add('show');
+}
+async function saveIncome(){
+  const o={name:document.getElementById('inc-name').value.trim(),type:document.getElementById('inc-type').value,amount:document.getElementById('inc-amount').value,date:document.getElementById('inc-date').value,place:document.getElementById('inc-place').value,note:document.getElementById('inc-note').value.trim()};
+  if(!o.amount){showToast('請填金額');return;}
+  try{await notionAPI('POST','/pages',{parent:{database_id:DB_SALARY},properties:salaryProps(o)});closeSheet('sheet-income');showToast('✅ 已新增');renderSalary();}
+  catch(e){showToast('❌ '+e.message);}
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -2167,16 +2394,17 @@ function showPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
-  const titles={home:'首頁',schedule:'本週排課',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄'};
+  const titles={home:'首頁',schedule:'本週排課',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(id==='students'){btn.textContent='＋ 學生';btn.onclick=()=>openAddStudent();}
-  else if(id==='detail'||id==='classroom'||id==='leaves'||id==='todo'||id==='checkins'){btn.style.display='none';}
+  else if(id==='detail'||id==='classroom'||id==='leaves'||id==='todo'||id==='checkins'||id==='salary'){btn.style.display='none';}
   else{btn.style.display='';btn.textContent='＋ 紀錄';btn.onclick=()=>openAddRecord();}
   if(id==='home'){renderHome();if(gcalValid()&&todayKey!==twToday())loadToday().then(()=>{if(curPage==='home')renderHome();});}
   if(id==='leaves') renderLeaves();
   if(id==='todo') renderTodo();
   if(id==='checkins') renderCheckins();
+  if(id==='salary') renderSalary();
   if(id==='schedule') renderSchedule();
   if(id==='students') renderStudents();
   document.getElementById('main-content').scrollTop=0;
