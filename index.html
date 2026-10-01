@@ -1570,11 +1570,11 @@ async function runCommand(){
       <div style="font-size:14px;font-weight:700;color:var(--text);">${s.name}・${lessonTxt}</div>
       <div style="font-size:13px;color:#c8a84a;margin:4px 0 10px;">→ ${desc}</div>
       <div style="display:flex;gap:8px;"><button class="btn-cancel" style="flex:1;" onclick="cmdPending=null;document.getElementById('cmd-result').innerHTML='';">取消</button>
-      <button class="btn-save" style="flex:1;" id="cmd-ok" onclick="execCommand()">✅ 確定</button></div></div>`;
+      <button class="btn-save" style="flex:1;" id="cmd-ok" onclick="confirmCommand()">✅ 確定</button></div></div>`;
   }catch(e){out.innerHTML=cmdMsg(e.message,true);}
 }
 function cmdMsg(t,err){return`<div style="font-size:12px;color:${err?'var(--red)':'var(--text3)'};margin-top:8px;">${err?'⚠️ ':''}${t}</div>`;}
-async function execCommand(){
+async function confirmCommand(){
   const c=cmdPending;if(!c)return;
   const btn=document.getElementById('cmd-ok');if(btn){btn.disabled=true;btn.textContent='處理中…';}
   const out=document.getElementById('cmd-result');
