@@ -53,7 +53,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
 .hero-drum{font-size:44px;}
 .hero-text .ht1{font-size:26px;font-weight:700;color:#ececec;}
 .hero-text .ht2{font-size:17px;color:var(--text3);margin-top:6px;}
-.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px;margin-bottom:16px;}
+.stat-row{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:0 16px;margin-bottom:16px;}
 .stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center;}
 .stat-num{font-size:22px;font-weight:900;color:var(--accent);font-family:'Space Mono',monospace;}
 .stat-label{font-size:10px;color:var(--text3);margin-top:2px;}
@@ -437,7 +437,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       </div>
       <div class="form-group"><label class="form-label">附上請假與調課</label>
         <select class="form-select" id="export-changes" onchange="buildExport()">
-          <option value="none">不附上</option><option value="range">只有這幾天</option><option value="4w" selected>這幾天＋之後 4 週</option>
+          <option value="none">不附上</option><option value="range" selected>只有這幾天</option><option value="4w">這幾天＋之後 4 週</option>
         </select></div>
       <div class="form-label" style="margin-bottom:6px;">點文字即可複製</div>
       <pre id="export-text" onclick="copyExport()" style="background:var(--card2);border:1px solid var(--border2);border-radius:10px;padding:12px;font-family:inherit;font-size:14px;line-height:1.7;color:var(--text);white-space:pre-wrap;cursor:pointer;margin:0;min-height:80px;user-select:text;-webkit-user-select:text;"></pre>
@@ -445,6 +445,26 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     <div class="sheet-footer">
       <button class="btn-cancel" onclick="closeSheet('sheet-export')">關閉</button>
       <button class="btn-save" onclick="copyExport()">📋 複製</button>
+    </div>
+  </div>
+</div>
+
+<!-- PARENT EXPORT SHEET -->
+<div class="overlay" id="sheet-parent">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="pe-title">📤 上課紀錄</div>
+    <div class="sheet-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">從</label><input class="form-input" type="month" id="pe-from" onchange="buildParentExport()"></div>
+        <div class="form-group"><label class="form-label">到</label><input class="form-input" type="month" id="pe-to" onchange="buildParentExport()"></div>
+      </div>
+      <div class="form-label" style="margin-bottom:6px;">點文字即可複製（只匯出「上課內容」）</div>
+      <pre id="pe-text" onclick="copyText('pe-text')" style="background:var(--card2);border:1px solid var(--border2);border-radius:10px;padding:12px;font-family:inherit;font-size:14px;line-height:1.7;color:var(--text);white-space:pre-wrap;cursor:pointer;margin:0;min-height:80px;user-select:text;-webkit-user-select:text;"></pre>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-parent')">關閉</button>
+      <button class="btn-save" onclick="copyText('pe-text')">📋 複製</button>
     </div>
   </div>
 </div>
@@ -1533,6 +1553,40 @@ async function buildExport(){
     box.textContent=out.join('\n').replace(/\n+$/,'');
   }catch(e){if(seq===exportSeq)box.textContent='❌ '+e.message;}
 }
+// ── 匯出上課紀錄給家長 ──
+let parentSid=null;
+function openParentExport(sid){
+  parentSid=sid;
+  const td=twToday();const ym=td.slice(0,7);
+  const prev=addDays(ym+'-01',-1).slice(0,7);
+  document.getElementById('pe-from').value=prev;
+  document.getElementById('pe-to').value=ym;
+  const s=students.find(x=>x.id===sid);
+  document.getElementById('pe-title').textContent=`📤 ${s?s.name:''}｜上課紀錄`;
+  document.getElementById('sheet-parent').classList.add('show');
+  buildParentExport();
+}
+function buildParentExport(){
+  let from=document.getElementById('pe-from').value,to=document.getElementById('pe-to').value;
+  if(from&&to&&from>to){[from,to]=[to,from];}
+  const box=document.getElementById('pe-text');
+  const recs=records.filter(r=>r.studentId===parentSid&&r.date&&(!from||r.date.slice(0,7)>=from)&&(!to||r.date.slice(0,7)<=to)&&(r.content||'').trim())
+    .sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:(a.time||'')<(b.time||'')?-1:1);
+  if(!recs.length){box.textContent='這段期間沒有上課內容紀錄';return;}
+  box.textContent=recs.map(r=>{
+    const [y,m,d]=r.date.split('-');
+    return `${y}/${parseInt(m)}/${parseInt(d)}\n${r.content.trim()}`;
+  }).join('\n\n');
+}
+async function copyText(id){
+  const el=document.getElementById(id);const t=el.textContent;
+  try{await navigator.clipboard.writeText(t);showToast('✅ 已複製');}
+  catch(e){
+    const r=document.createRange();r.selectNodeContents(el);
+    const sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);
+    try{document.execCommand('copy');showToast('✅ 已複製');}catch(e2){showToast('請長按文字手動複製');}
+  }
+}
 async function copyExport(){
   const t=document.getElementById('export-text').textContent;
   try{await navigator.clipboard.writeText(t);showToast('✅ 已複製');}
@@ -1666,7 +1720,6 @@ function renderHome(){
 
 
   document.getElementById('stat-row').innerHTML=`
-    <div class="stat-card"><div class="stat-num">${students.length}</div><div class="stat-label">總學生數</div></div>
     <div class="stat-card"><div class="stat-num">${todayScheduledCount()}</div><div class="stat-label">今日上課堂數</div></div>
     <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
   document.getElementById('gcal-panel').innerHTML=NOTION_TOKEN?gcalPanelHtml():'';
@@ -1968,7 +2021,7 @@ function renderDetail(id){
     <div id="leave-records"></div>
     <div class="rec-section-head">
       <div class="sec-line"><div class="section-title">上課紀錄</div><div class="rec-count">・${recs.length} 筆・由新到舊</div></div>
-      <button class="add-rec-btn" onclick="openAddRecord('${id}')">＋ 新增</button>
+      <div style="display:flex;gap:6px;flex-shrink:0;"><button onclick="openParentExport('${id}')" style="${smallBtn('var(--text2)')}">匯出</button><button class="add-rec-btn" onclick="openAddRecord('${id}')">＋ 新增</button></div>
     </div>
     <div class="rec-list">${recs.length===0?
       `<div class="rec-empty">📝 還沒有上課紀錄</div>`:
