@@ -258,6 +258,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       </div>
       <div class="detail-wrap" id="detail-wrap"></div>
     </div>
+    <div class="page" id="page-todo">
+      <button class="back-bar" onclick="showPage('home')">‹ 首頁</button>
+      <div style="padding:0 16px 24px;" id="todo-wrap"></div>
+    </div>
     <div class="page" id="page-leaves">
       <button class="back-bar" onclick="showPage('home')">‹ 首頁</button>
       <div style="padding:0 16px 24px;" id="leaves-wrap"></div>
@@ -917,32 +921,52 @@ async function loadToday(){
     todayKey=td;
   }catch(e){todayEvents=null;}
 }
-function unrecHtml(){
-  const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;';
-  if(!gcalValid()) return`<div style="${box}display:flex;align-items:center;gap:10px;"><div style="flex:1;font-size:13px;color:var(--text3);">📝 連接 Google 日曆後，會在這裡提醒未紀錄的課</div><button style="${smallBtn('var(--accent)')}" onclick="gcalConnect()">連接</button></div>`;
-  if(!todayEvents||todayKey!==twToday()) return`<div style="${box}font-size:13px;color:var(--text3);">📝 讀取今日課程中…</div>`;
+// 首頁摘要卡（點進去看昨天＋今天的紀錄卡片）
+function todoData(){
   const td=twToday(),yd=addDays(td,-1),now=Date.now();
-  const lessons=todayEvents.filter(e=>!evState(e));
+  const lessons=(todayEvents||[]).filter(e=>!evState(e));
   const dateOf=e=>evParts(e.start.dateTime).date;
-  const ended=lessons.filter(e=>new Date(e.end.dateTime).getTime()<=now);
-  const isRec=e=>records.some(r=>r.studentId===e.extendedProperties.private.studentId&&r.date===dateOf(e));
-  const miss=ended.filter(e=>!isRec(e));
-  const todayAll=lessons.filter(e=>dateOf(e)===td);
-  const todayEnded=ended.filter(e=>dateOf(e)===td);
-  if(miss.length===0){
-    let msg;
-    if(todayAll.length===0) msg='📝 今天沒有課';
-    else if(todayEnded.length===0) msg=`📝 今天有 ${todayAll.length} 堂課，上完後會在這裡提醒你記錄`;
-    else msg=`✅ 今天上完的 ${todayEnded.length} 堂課都記錄好了${todayEnded.length<todayAll.length?`（還有 ${todayAll.length-todayEnded.length} 堂未上）`:''}`;
-    return`<div style="${box}font-size:13px;color:${msg.startsWith('✅')?'var(--accent)':'var(--text3)'};">${msg}</div>`;
-  }
-  return`<div style="${box}border-color:rgba(200,168,74,0.5);">
-    <div style="font-size:13px;font-weight:700;color:#c8a84a;margin-bottom:8px;">📝 還有 ${miss.length} 堂課未紀錄</div>
-    ${miss.map(e=>{const p=evParts(e.start.dateTime);const sid=e.extendedProperties.private.studentId;
-      return`<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border);">
-        <div style="flex:1;font-size:13px;color:var(--text);">${evName(e)} <span style="font-size:11px;color:var(--text3);">${p.date===yd?'昨天 ':''}${p.hhmm}</span></div>
-        <button onclick="recordLesson('${sid}','${p.hhmm}','${p.date}')" style="${smallBtn('var(--accent)')}">記錄</button></div>`;}).join('')}
-  </div>`;
+  const recOf=e=>records.find(r=>r.studentId===e.extendedProperties.private.studentId&&r.date===dateOf(e));
+  const items=lessons.map(e=>({e,date:dateOf(e),p:evParts(e.start.dateTime),ended:new Date(e.end.dateTime).getTime()<=now,rec:recOf(e)}));
+  return{td,yd,items,miss:items.filter(x=>x.ended&&!x.rec)};
+}
+function unrecHtml(){
+  const box='background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 14px;display:flex;align-items:center;gap:10px;';
+  if(!gcalValid()) return`<div style="${box}"><div style="flex:1;font-size:13px;color:var(--text3);">📝 連接 Google 日曆後，會在這裡提醒未紀錄的課</div><button style="${smallBtn('var(--accent)')}" onclick="gcalConnect()">連接</button></div>`;
+  if(!todayEvents||todayKey!==twToday()) return`<div style="${box}font-size:13px;color:var(--text3);">📝 讀取課程中…</div>`;
+  const {td,items,miss}=todoData();
+  const todayAll=items.filter(x=>x.date===td),todayEnded=todayAll.filter(x=>x.ended);
+  let msg,color='var(--text3)',hot=false;
+  if(miss.length){msg=`📝 還有 ${miss.length} 堂課未紀錄`;color='#c8a84a';hot=true;}
+  else if(todayAll.length===0) msg=items.length?'✅ 昨天的課都記錄好了・今天沒有課':'📝 今天沒有課';
+  else if(todayEnded.length===0) msg=`📝 今天有 ${todayAll.length} 堂課，上完後會提醒你記錄`;
+  else{msg=`✅ 今天上完的 ${todayEnded.length} 堂都記錄好了${todayEnded.length<todayAll.length?`・還有 ${todayAll.length-todayEnded.length} 堂未上`:''}`;color='var(--accent)';}
+  return`<div style="${box}${hot?'border-color:rgba(200,168,74,0.5);':''}${items.length?'cursor:pointer;':''}" ${items.length?`onclick="showPage('todo')"`:''}>
+    <div style="flex:1;font-size:13px;font-weight:${hot?700:400};color:${color};">${msg}</div>${items.length?'<div style="color:var(--text3);font-size:18px;">›</div>':''}</div>`;
+}
+// 待寫紀錄頁：昨天＋今天的課，已紀錄的顯示灰色
+function renderTodo(){
+  const wrap=document.getElementById('todo-wrap');
+  if(!gcalValid()||!todayEvents){wrap.innerHTML=`<div class="rec-empty">請先連接 Google 日曆</div>`;return;}
+  const {td,yd,items,miss}=todoData();
+  const sec=(label,ds)=>{
+    const list=items.filter(x=>x.date===ds).sort((a,b)=>a.p.min-b.p.min);
+    if(!list.length) return'';
+    const left=list.filter(x=>!x.rec).length;
+    return`<div class="rec-section-head" style="margin-top:6px;"><div class="sec-line"><div class="section-title">${label}</div><div class="rec-count">・${fmtMD(ds)}・${list.length} 堂・未紀錄 ${left}</div></div></div>
+      ${list.map(x=>{
+        const sid=x.e.extendedProperties.private.studentId;const s=students.find(y=>y.id===sid);
+        const done=!!x.rec;
+        const tag=done?`<span style="color:var(--accent);font-weight:700;">✅ 已記錄</span>`:x.ended?`<span style="color:#c8a84a;font-weight:700;">待紀錄</span>`:`<span style="color:var(--text3);">尚未上課</span>`;
+        const click=done?`editRecord('${x.rec.id}')`:`recordLesson('${sid}','${x.p.hhmm}','${x.date}')`;
+        return`<div class="student-row" onclick="${click}" style="margin-bottom:8px;${done?'opacity:0.45;filter:grayscale(1);':''}${!done&&x.ended?'border-color:rgba(200,168,74,0.5);':''}">
+          <div class="s-avatar">${s?avatarHtml(s,44):''}</div>
+          <div class="s-info"><div class="s-name">${evName(x.e)}</div><div class="s-meta">${(s?s.room:x.e.location||'').replace(' Yamaha','')} · ${x.p.hhmm}</div></div>
+          <div class="s-right" style="font-size:12px;">${tag}</div>
+        </div>`;}).join('')}`;
+  };
+  const html=sec('昨天',yd)+sec('今天',td);
+  wrap.innerHTML=`<div style="font-size:13px;color:var(--text2);margin-bottom:10px;">${miss.length?`還有 <b style="color:#c8a84a;">${miss.length}</b> 堂上完的課沒寫紀錄，點卡片就能填寫`:'上完的課都記錄好了 👍'}</div>`+(html||`<div class="rec-empty">昨天和今天都沒有課</div>`);
 }
 function recordLesson(sid,hhmm,ds){openAddRecord(sid);document.getElementById('rec-time').value=hhmm;if(ds)document.getElementById('rec-date').value=ds;}
 
@@ -1224,14 +1248,15 @@ function showPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
-  const titles={home:'首頁',schedule:'本週排課',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄'};
+  const titles={home:'首頁',schedule:'本週排課',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(id==='students'){btn.textContent='＋ 學生';btn.onclick=()=>openAddStudent();}
-  else if(id==='detail'||id==='classroom'||id==='leaves'){btn.style.display='none';}
+  else if(id==='detail'||id==='classroom'||id==='leaves'||id==='todo'){btn.style.display='none';}
   else{btn.style.display='';btn.textContent='＋ 紀錄';btn.onclick=()=>openAddRecord();}
   if(id==='home'){renderHome();if(gcalValid()&&todayKey!==twToday())loadToday().then(()=>{if(curPage==='home')renderHome();});}
   if(id==='leaves') renderLeaves();
+  if(id==='todo') renderTodo();
   if(id==='schedule') renderSchedule();
   if(id==='students') renderStudents();
   document.getElementById('main-content').scrollTop=0;
@@ -1675,6 +1700,7 @@ async function saveRecord(){
     showToast(editingRecordId?'✅ 紀錄已更新！':'✅ 紀錄已儲存到 Notion！');
     if(curPage==='detail') renderDetail(curStudent);
     if(curPage==='home') renderHome();
+    if(curPage==='todo') renderTodo();
   }catch(e){showToast('❌ 儲存失敗，請重試');console.error(e);}
   btn.textContent='✅ 儲存';btn.disabled=false;
 }
