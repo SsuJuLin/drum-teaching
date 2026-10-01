@@ -2250,6 +2250,12 @@ async function renderSalary(){
     }
     // Notion：獎金、錄音案子、其他收入（依日期歸月）
     rows.filter(r=>r.type&&r.type!=='入帳'&&r.date&&r.date>=first&&r.date<next).forEach(r=>{const x=P(r.place||'其他');x.pay+=r.amount||0;x.extra.push(r);});
+    // 沒有課程資料的舊月份：用入帳金額當作應領（歷史紀錄）
+    rows.filter(r=>r.type==='入帳'&&(r.name||'').startsWith(mk)&&r.place).forEach(r=>{
+      const x=places[r.place];
+      if(!x){const y2=P(r.place);y2.hist=true;y2.pay+=r.amount||0;}
+      else if(x.hist) x.pay+=r.amount||0;
+    });
     const order=[...Object.keys(PAY_RULES),'其他'];
     const list=Object.values(places).sort((a,b)=>order.indexOf(a.place)-order.indexOf(b.place));
     const total=list.reduce((a,x)=>a+x.pay,0);
@@ -2274,7 +2280,8 @@ async function renderSalary(){
         <div style="display:flex;align-items:baseline;gap:8px;">
           <div style="flex:1;font-size:15px;font-weight:800;color:var(--text);">${x.place.replace(' Yamaha','')}</div>
           <div style="font-size:16px;font-weight:800;color:var(--text);">${money(x.pay)}</div></div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${x.lessons||x.subs?`上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${x.hours.toFixed(1)} 小時${rule.rate?`・時薪 ${rule.rate}`:''}・`:''}${due}</div>
+        ${x.hist?`<div style="font-size:11px;color:var(--text3);margin-top:2px;">歷史紀錄（依入帳金額）</div>`:''}
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${x.hist?'':x.lessons||x.subs?`上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${x.hours.toFixed(1)} 小時${rule.rate?`・時薪 ${rule.rate}`:''}・`:''}${due}</div>
         ${x.per4.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.per4.map(p=>p.progress?`<span style="color:var(--text3);">${esc(p.name)} 進度 ${p.progress}/4</span>`:`✅ ${esc(p.name)} 滿四堂（${mdShort(p.date)}）${money(p.pay)}`).join('<br>')}</div>`:''}
         ${x.extra.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.extra.map(r=>`＋ ${esc(r.type)}${r.name?'・'+esc(r.name):''} ${money(r.amount||0)}`).join('<br>')}</div>`:''}
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
