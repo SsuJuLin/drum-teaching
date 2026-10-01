@@ -320,7 +320,6 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         </div>
         <div class="form-group"><label class="form-label">星期</label><select class="form-select" id="stu-day"></select></div>
       </div>
-      <div class="form-group"><label class="form-label">上課時間</label>
       <div class="form-row">
         <div class="form-group"><label class="form-label">上課時間</label>
           <select class="form-select" id="stu-time">
@@ -570,12 +569,22 @@ function showPage(id){
   document.getElementById('main-content').scrollTop=0;
 }
 
+// 今日上課堂數：與課表相同的規則（正常上課、今天星期、有上課時間且在 08–22 之間）
+function todayScheduledCount(){
+  const today=DAYS[[6,0,1,2,3,4,5][new Date().getDay()]];
+  return students.filter(s=>{
+    if(s.status==='不上課'||s.status==='暫停上課') return false;
+    if(s.day!==today||!s.time) return false;
+    const h=parseInt(normalizeTime(s.time).split(':')[0]);
+    return h>=8&&h<22;
+  }).length;
+}
 function renderHome(){
 
 
   document.getElementById('stat-row').innerHTML=`
     <div class="stat-card"><div class="stat-num">${students.length}</div><div class="stat-label">總學生數</div></div>
-    <div class="stat-card"><div class="stat-num">${records.filter(r=>r.date===todayStr()).length}</div><div class="stat-label">今日上課堂數</div></div>
+    <div class="stat-card"><div class="stat-num">${todayScheduledCount()}</div><div class="stat-label">今日上課堂數</div></div>
     <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
   document.getElementById('classroom-list').innerHTML=CLASSROOMS.map(c=>{
     const cnt=students.filter(s=>s.room===c.name).length;
