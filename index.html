@@ -376,7 +376,8 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
 <div class="toast" id="toast"></div>
 
 <script>
-const NOTION_TOKEN='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';
+// Token 從 localStorage 讀取，不寫死在程式碼裡
+let NOTION_TOKEN=localStorage.getItem('notion_token')||'';
 const DB_STUDENTS='35ed68e58caf8072b186f51ff4aa9d09';
 const DB_RECORDS='35ed68e58caf8069bb38fc4d6d821494';
 const PROXY='https://notion-proxy.doristtn.workers.dev/?url=';
@@ -1002,6 +1003,21 @@ function updateDays(){
 }
 
 async function init(){
+  // 如果沒有 Token，顯示輸入畫面
+  if(!NOTION_TOKEN){
+    document.getElementById('stat-row').innerHTML=`
+      <div style="grid-column:1/-1;padding:24px 16px;">
+        <div style="background:var(--card);border:1px solid var(--border2);border-radius:16px;padding:24px;text-align:center;">
+          <div style="font-size:32px;margin-bottom:12px;">🔑</div>
+          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px;">請輸入 Notion Token</div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:16px;line-height:1.6;">到 Notion → 開發人員工具 → 爵士鼓教學系統<br>複製 Internal Integration Secret</div>
+          <input id="token-input" type="password" placeholder="ntn_..." style="width:100%;background:var(--card2);border:1px solid var(--border2);border-radius:10px;padding:11px 14px;font-family:inherit;font-size:14px;color:var(--text);outline:none;margin-bottom:12px;">
+          <button onclick="saveToken()" style="width:100%;background:var(--accent);color:#0a0f0a;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;">✅ 確認連接</button>
+        </div>
+      </div>`;
+    document.getElementById('classroom-list').innerHTML='';
+    return;
+  }
   document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
   try{
     await Promise.all([loadStudents(),loadRecords()]);
@@ -1010,6 +1026,14 @@ async function init(){
   }catch(e){
     document.getElementById('stat-row').innerHTML=`<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--red);">❌ 無法連接 Notion<br><small>${e.message}</small></div>`;
   }
+}
+
+function saveToken(){
+  const t=document.getElementById('token-input').value.trim();
+  if(!t){showToast('請輸入 Token');return;}
+  NOTION_TOKEN=t;
+  localStorage.setItem('notion_token',t);
+  init();
 }
 updateDays();init();
 </script>
