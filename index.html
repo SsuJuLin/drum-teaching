@@ -126,6 +126,9 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
 .progress-fill{height:100%;background:var(--accent);border-radius:3px;transition:width 0.4s;}
 .rec-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
 .rec-count{font-size:12px;color:var(--text3);}
+.sec-line{display:flex;align-items:baseline;min-width:0;flex:1;white-space:nowrap;overflow:hidden;margin-right:8px;}
+.sec-line .section-title{font-size:15px;font-weight:800;color:var(--accent);letter-spacing:0.02em;flex-shrink:0;}
+.sec-line .rec-count{overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .add-rec-btn{background:var(--accent);color:#0a0f0a;border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;}
 .rec-list{display:flex;flex-direction:column;gap:8px;}
 .rec-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
@@ -751,7 +754,7 @@ async function loadUpcoming(sid){
   const recBox=document.getElementById('leave-records');
   if(!gcalValid()){
     box.innerHTML=`<div class="rec-empty" style="padding:18px;">連接 Google 日曆後，可在這裡查看近期課程、請假與補課<br><button class="add-rec-btn" style="margin-top:10px;" onclick="gcalConnect()">連接 Google 日曆</button></div>`;
-    if(statBox) statBox.textContent='Google 日曆';
+    if(statBox) statBox.textContent='';
     if(recBox) recBox.innerHTML='';
     return;
   }
@@ -765,7 +768,7 @@ async function loadUpcoming(sid){
     const leaves=all.filter(e=>evState(e)==='leave'&&e.extendedProperties.private.kind==='weekly');
     const makeups=all.filter(e=>e.extendedProperties.private.makeup==='1'&&!evState(e));
     const owed=Math.max(0,leaves.length-makeups.length);
-    if(statBox) statBox.textContent=s&&!isBooking(s)?`請假 ${leaves.length}・已補 ${makeups.length}・待補 ${owed}`:'Google 日曆';
+    if(statBox) statBox.textContent=s&&!isBooking(s)?`・請假 ${leaves.length}・已補 ${makeups.length}・待補 ${owed}`:'';
     const now=Date.now();
     const up=all.filter(e=>new Date(e.end.dateTime).getTime()>=now).slice(0,5);
     box.innerHTML=up.length===0?`<div class="rec-empty" style="padding:18px;">目前沒有排定的課程</div>`:up.map(lessonRow).join('');
@@ -781,7 +784,7 @@ function renderChanges(){
   const inRange=ch.filter(e=>{const d=evParts(e.start.dateTime).date;return d>=lo&&d<=hi;});
   const list=changeShowAll?ch:inRange;
   const more=ch.length-inRange.length;
-  recBox.innerHTML=`<div class="rec-section-head" style="margin-top:4px;"><div><div class="section-title">課程異動紀錄</div><div class="rec-count">${changeShowAll?`全部 ${ch.length} 筆`:`前後一個月 ${inRange.length} 筆`}</div></div>
+  recBox.innerHTML=`<div class="rec-section-head" style="margin-top:4px;"><div class="sec-line"><div class="section-title">課程異動紀錄</div><div class="rec-count">${changeShowAll?`・全部 ${ch.length} 筆`:`・前後一個月 ${inRange.length} 筆`}</div></div>
     ${more>0||changeShowAll?`<button onclick="changeShowAll=!changeShowAll;renderChanges();" style="${smallBtn('var(--text2)')}">${changeShowAll?'只看前後一個月':`顯示全部（+${more}）`}</button>`:''}</div>
     <div style="margin-bottom:18px;">${list.length===0?`<div class="rec-empty" style="padding:14px;">這段期間沒有異動</div>`:list.map(changeRow).join('')}</div>`;
 }
@@ -792,7 +795,7 @@ function changeRow(e){
   else if(st==='teacherOff'){icon='⛔';text='老師停課';}
   else if(pr.moved==='1'){
     const o=e.originalStartTime?.dateTime||pr.origStart;icon='🔁';
-    text=o?`調課（原 ${fmtMD(evParts(o).date)} ${evParts(o).hhmm}）`:'調課';
+    text=(pr.fromOff==='1'?'老師請假・改期上課':'調課')+(o?`（原 ${fmtMD(evParts(o).date)} ${evParts(o).hhmm}）`:'');
   }
   else{icon='➕';text='補課';}
   return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;">
@@ -808,12 +811,12 @@ function lessonRow(ev){
   let label=st==='leave'?'🚫 請假':st==='teacherOff'?'⛔ 老師停課':isMk?'補課':isB?'約課':'固定課';
   if(pr.moved==='1'&&!st){
     const o=ev.originalStartTime?.dateTime||pr.origStart;
-    label+=o?`・已調課（原 ${fmtMD(evParts(o).date).split(' ')[0]} ${evParts(o).hhmm}）`:'・已調課';
+    label+=(pr.fromOff==='1'?'・停課改期':'・已調課')+(o?`（原 ${fmtMD(evParts(o).date).split(' ')[0]} ${evParts(o).hhmm}）`:'');
   }
   const mv=`<button onclick="openReschedule('${ev.id}')" style="${smallBtn('var(--text2)')}">調課</button>`;
   let btn='';
   if(st==='leave') btn=`<button onclick="restoreLeave('${ev.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;
-  else if(st==='teacherOff') btn='';
+  else if(st==='teacherOff') btn=`<button onclick="openReschedule('${ev.id}')" style="${smallBtn('var(--text2)')}">調課</button>`;
   else if(isB) btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('var(--red)')}">${isMk?'取消補課':'取消約課'}</button>`;
   else btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('#c8a84a')}">請假</button>`;
   btn=btn?`<div style="display:flex;gap:6px;flex-shrink:0;">${btn}</div>`:'';
@@ -990,7 +993,7 @@ function openReschedule(evId){
   bookingStudentId=sid;rescheduleEvId=evId;
   const p=evParts(ev.start.dateTime);
   const dur=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000)||60;
-  document.getElementById('book-title').textContent=`🔁 ${evName(ev)}｜調課（原 ${fmtMD(p.date)} ${p.hhmm}）`;
+  document.getElementById('book-title').textContent=`🔁 ${evName(ev)}｜${evState(ev)==='teacherOff'?'停課改期':'調課'}（原 ${fmtMD(p.date)} ${p.hhmm}）`;
   document.getElementById('book-date').value=p.date;
   document.getElementById('book-time').value=p.hhmm;
   document.getElementById('book-duration').value=String(dur);
@@ -1019,9 +1022,12 @@ async function saveBooking(){
     if(rescheduleEvId){
       const ev=evCache[rescheduleEvId];
       const start=twISO(ds,tm);
+      const wasOff=evState(ev)==='teacherOff';
       const pr={...(ev.extendedProperties?.private||{}),moved:'1'};
+      if(wasOff) pr.fromOff='1';
       if(!ev.originalStartTime&&!pr.origStart) pr.origStart=ev.start.dateTime;
-      await gcal('PATCH',`/events/${ev.id}`,{start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'},extendedProperties:{private:pr}});
+      const upd=await gcal('PATCH',`/events/${ev.id}`,{start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'},extendedProperties:{private:pr}});
+      if(wasOff&&upd) await markEvent(upd,''); // 老師停課的課改期後恢復成正常上課
       weekKey=null;todayKey=null;rescheduleEvId=null;closeSheet('sheet-booking');
       showToast(`✅ 已調到 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);
       btn.disabled=false;btn.textContent='✅ 建立';return;
@@ -1490,13 +1496,13 @@ function renderDetail(id){
       </div>
     </div>
     <div class="rec-section-head">
-      <div><div class="section-title">近期課程</div><div class="rec-count" id="leave-stat">Google 日曆</div></div>
+      <div class="sec-line"><div class="section-title">近期課程</div><div class="rec-count" id="leave-stat"></div></div>
       <button class="add-rec-btn" onclick="openBooking('${id}')">＋ ${isBooking(s)?'約課':'補課'}</button>
     </div>
     <div id="upcoming-list" style="margin-bottom:18px;"></div>
     <div id="leave-records"></div>
     <div class="rec-section-head">
-      <div><div class="section-title">上課紀錄</div><div class="rec-count">${recs.length} 筆，由新到舊</div></div>
+      <div class="sec-line"><div class="section-title">上課紀錄</div><div class="rec-count">・${recs.length} 筆・由新到舊</div></div>
       <button class="add-rec-btn" onclick="openAddRecord('${id}')">＋ 新增</button>
     </div>
     <div class="rec-list">${recs.length===0?
