@@ -2126,7 +2126,7 @@ async function renderCheckins(){
 }
 
 // ══════════ 薪資統計 ══════════
-const DB_SALARY=''; // ← 「薪資紀錄」資料庫 ID（貼上網址後填入）
+const DB_SALARY='3ecd68e58caf80ec9f3bee8ee1c2d517'; // 「薪資紀錄」資料庫
 const PAY_RULES={
   '林口星玥':{rate:600,payDay:10},
   '楊梅宏音 Yamaha':{rate:455,payDay:1},
@@ -2160,7 +2160,7 @@ function lessonRate(e,place){
   return s&&s.rate?s.rate:rule.rate;
 }
 function lessonPay(e,place){return Math.round(lessonRate(e,place)*(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000);}
-let salaryOff=0,salaryRows=[];
+let salaryOff=0,salaryRows=[],salaryErr='';
 function shiftSalary(n){salaryOff+=n;renderSalary();}
 function monthKey(y,m){return `${y}/${String(m).padStart(2,'0')}`;}
 async function renderSalary(){
@@ -2182,7 +2182,7 @@ async function renderSalary(){
     const startAll='2025-01-01';
     const [lessonsAll,rows]=await Promise.all([
       gcalAll([['timeMin',twISO(startAll,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
-      querySalary().catch(e=>{console.error(e);return[];}),
+      querySalary().then(r=>{salaryErr='';return r;}).catch(e=>{salaryErr=e.message;return[];}),
     ]);
     salaryRows=rows;
     const lessons=lessonsAll.filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&!evState(e)&&(e.extendedProperties?.private?.studentId||isSub(e))&&new Date(e.end.dateTime).getTime()<=Date.now()+0*1);
@@ -2226,7 +2226,8 @@ async function renderSalary(){
       <div style="font-size:12px;color:var(--text3);">應領合計${salaryOff===0?'（只算已上完的課）':''}</div>
       <div style="font-size:26px;font-weight:900;color:var(--accent);margin:2px 0;">${money(total)}</div>
       <div style="font-size:12px;color:var(--text3);">已入帳 ${money(paidTotal)}${total-paidTotal>0?`・未入帳 ${money(total-paidTotal)}`:''}</div>
-      ${DB_SALARY?`<button class="add-rec-btn" style="margin-top:10px;" onclick="openIncome()">＋ 獎金／錄音案子／其他</button>`:`<div style="font-size:11px;color:#c8a84a;margin-top:8px;">尚未連接 Notion「薪資紀錄」資料庫，入帳與額外收入暫時無法記錄</div>`}
+      ${salaryErr?`<div style="font-size:11px;color:var(--red);margin-top:8px;">讀不到 Notion「薪資紀錄」資料庫（${esc(salaryErr)}），請確認資料庫已「連接」爵士鼓教學系統</div>`:''}
+      ${DB_SALARY&&!salaryErr?`<button class="add-rec-btn" style="margin-top:10px;" onclick="openIncome()">＋ 獎金／錄音案子／其他</button>`:`<div style="font-size:11px;color:#c8a84a;margin-top:8px;">尚未連接 Notion「薪資紀錄」資料庫，入帳與額外收入暫時無法記錄</div>`}
     </div>`;
     if(!list.length) html+=`<div class="rec-empty">這個月沒有收入紀錄</div>`;
     list.forEach(x=>{
