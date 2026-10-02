@@ -2137,17 +2137,22 @@ async function renderCheckins(){
     monthChecks=(c&&c.items||[]).filter(e=>e.status!=='cancelled');
     const lessons=(l&&l.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&!evState(e)&&(e.extendedProperties?.private?.studentId||isSub(e)));
     const sum={};
-    monthChecks.forEach(e=>{const p=e.extendedProperties?.private?.place||'?';(sum[p]=sum[p]||{h:0,days:0,lessons:0,mins:0,subs:0});sum[p].h+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000;sum[p].days++;});
-    lessons.forEach(e=>{const p=lessonPlace(e)||'其他';(sum[p]=sum[p]||{h:0,days:0,lessons:0,mins:0,subs:0});
-      if(isSub(e)) sum[p].subs++; else sum[p].lessons++;
-      sum[p].mins+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000;});
+    const S=p=>sum[p]=sum[p]||{h:0,days:0,plan:0,planM:0,done:0,doneM:0,planSub:0,doneSub:0};
+    monthChecks.forEach(e=>{const x=S(e.extendedProperties?.private?.place||'?');x.h+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000;x.days++;});
+    const nowMs=Date.now();
+    lessons.forEach(e=>{const x=S(lessonPlace(e)||'其他');const mins=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000;
+      const done=new Date(e.end.dateTime).getTime()<=nowMs;
+      if(isSub(e)){x.planSub++;if(done)x.doneSub++;}
+      x.plan++;x.planM+=mins;if(done){x.done++;x.doneM+=mins;}});
     const tot=Object.values(sum).reduce((a,x)=>a+x.h,0);
     let html=`<div class="rec-card" style="padding:12px;margin-bottom:14px;">
       <div style="font-size:13px;color:var(--text2);margin-bottom:8px;">本月打卡 <b style="color:var(--text);">${monthChecks.length}</b> 次・共 <b style="color:var(--text);">${tot.toFixed(1)}</b> 小時</div>
-      ${Object.entries(sum).map(([p,x])=>`<div style="display:flex;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid var(--border);">
-        <div style="flex:1;color:var(--text);">${p.replace(' Yamaha','')}</div>
-        <div style="color:var(--text3);">打卡 ${x.days} 天・${x.h.toFixed(1)}h</div>
-        <div style="color:var(--text3);">上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${(x.mins/60).toFixed(1)}h</div></div>`).join('')}
+      ${Object.entries(sum).map(([p,x])=>`<div style="font-size:12px;padding:6px 0;border-top:1px solid var(--border);">
+        <div style="display:flex;gap:8px;"><div style="flex:1;color:var(--text);font-weight:700;">${p.replace(' Yamaha','')}</div>
+          <div style="color:var(--text2);">打卡 ${x.days} 天・${x.h.toFixed(1)}h</div></div>
+        <div style="display:flex;gap:12px;color:var(--text3);margin-top:2px;">
+          <div>實上 <b style="color:var(--text2);">${x.done}</b> 堂${x.doneSub?`（含代課 ${x.doneSub}）`:''}・${(x.doneM/60).toFixed(1)}h</div>
+          <div>應上 ${x.plan} 堂${x.planSub?`（含代課 ${x.planSub}）`:''}・${(x.planM/60).toFixed(1)}h</div></div></div>`).join('')}
     </div>`;
     html+=monthChecks.length?[...monthChecks].reverse().map(e=>{
       const a=evParts(e.start.dateTime),b=evParts(e.end.dateTime);const p=e.extendedProperties?.private||{};
