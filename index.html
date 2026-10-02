@@ -361,7 +361,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">生日</label><input class="form-input" type="date" id="stu-bd"></div>
-        <div class="form-group"><label class="form-label">家長 LINE</label><input class="form-input" id="stu-pline" placeholder="加好友網址"></div>
+        <div class="form-group"><label class="form-label">家長 LINE</label><input class="form-input" id="stu-pline" placeholder="LINE 顯示名稱或網址"></div>
         <input type="hidden" id="stu-parent"><input type="hidden" id="stu-pphone">
       </div>
       <div class="form-row">
@@ -748,10 +748,18 @@ function lineUrl(v){
   if(v.startsWith('@')) return 'https://line.me/R/ti/p/'+encodeURIComponent(v);
   return 'https://line.me/ti/p/~'+encodeURIComponent(v);
 }
+function copyLineName(n){
+  try{navigator.clipboard.writeText(n);showToast(`已複製「${n}」，在 LINE 聊天列表搜尋貼上`);}catch(e){}
+}
 function contactHtml(s){
   const rows=[];
   if(s.birthday){const [y,m,d]=s.birthday.split('-');rows.push(`<div style="font-size:13px;color:var(--text2);">🎂 ${y}/${parseInt(m)}/${parseInt(d)}・${ageOf(s.birthday)} 歲</div>`);}
-  if(s.parentLine) rows.push(`<div><a href="${lineUrl(s.parentLine)}" target="_blank" rel="noopener" style="${smallBtn('#06c755')}text-decoration:none;border-color:#06c755;display:inline-block;">💬 家長 LINE</a></div>`);
+  if(s.parentLine){
+    const isUrl=/^https?:\/\//.test(s.parentLine.trim());
+    rows.push(isUrl
+      ?`<div><a href="${lineUrl(s.parentLine)}" target="_blank" rel="noopener" style="${smallBtn('#06c755')}text-decoration:none;border-color:#06c755;display:inline-block;">💬 家長 LINE</a></div>`
+      :`<div style="display:flex;align-items:center;gap:8px;"><a href="https://line.me/R/nv/chat" target="_blank" rel="noopener" onclick="copyLineName('${esc(s.parentLine).replace(/'/g,'&#39;')}')" style="${smallBtn('#06c755')}text-decoration:none;border-color:#06c755;display:inline-block;">💬 家長 LINE</a><span style="font-size:12px;color:var(--text3);">${esc(s.parentLine)}</span></div>`);
+  }
   if(!rows.length) return '';
   return`<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">${rows.join('')}</div>`;
 }
