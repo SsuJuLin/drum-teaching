@@ -360,6 +360,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         <div class="form-group"><label class="form-label">暱稱（選填）</label><input class="form-input" id="stu-nick" placeholder="例：珩、小明"></div>
       </div>
       <div class="form-row">
+        <div class="form-group"><label class="form-label">開始上課日</label><input class="form-input" type="date" id="stu-start"></div>
+        <div class="form-group"><label class="form-label">藝文起始進度</label><input class="form-input" type="number" inputmode="numeric" min="0" max="3" id="stu-p4" placeholder="只有藝文要填"></div>
+      </div>
+      <div class="form-row">
         <div class="form-group"><label class="form-label">教室</label>
           <select class="form-select" id="stu-room" onchange="updateDays()">
             <option>楊梅宏音 Yamaha</option><option>林口星玥</option><option>內壢奧莉琪</option><option>藝文鹿納</option>
@@ -701,11 +705,13 @@ function gp(page,name,type){
   return '';
 }
 
-let HAS_BOOKING_FIELD=false,HAS_NICK_FIELD=false;
+let HAS_BOOKING_FIELD=false,HAS_NICK_FIELD=false,HAS_START_FIELD=false,HAS_P4_FIELD=false;
 async function loadStudents(){
   const pages=await queryDB(DB_STUDENTS,null,[{property:'學生',direction:'ascending'}]);
   HAS_BOOKING_FIELD=pages.some(p=>p.properties&&('排課方式' in p.properties));
   HAS_NICK_FIELD=pages.some(p=>p.properties&&('暱稱' in p.properties));
+  HAS_START_FIELD=pages.some(p=>p.properties&&('開始上課日' in p.properties));
+  HAS_P4_FIELD=pages.some(p=>p.properties&&('藝文起始進度' in p.properties));
   students=pages.map((p,i)=>({
     id:p.id,
     name:gp(p,'學生','title'),
@@ -717,6 +723,8 @@ async function loadStudents(){
     booking:gp(p,'排課方式','select')||'每週固定',
     rate:gp(p,'特別時薪','number')||0,
     nick:gp(p,'暱稱','rich_text')||'',
+    startDate:gp(p,'開始上課日','date')||'',
+    p4start:gp(p,'藝文起始進度','number')||0,
     note:gp(p,'備註','rich_text'),
     photo:gp(p,'照片','files'),
     color:COLORS[i%COLORS.length],
@@ -771,6 +779,8 @@ async function updateStudent(id,data){
     '備註':{rich_text:[{text:{content:String(data.note||'')}}]},
     ...(HAS_BOOKING_FIELD?{'排課方式':{select:{name:data.booking||'每週固定'}}}:{}),
     ...(HAS_NICK_FIELD?{'暱稱':{rich_text:[{text:{content:String(data.nick||'')}}]}}:{}),
+    ...(HAS_START_FIELD?{'開始上課日':{date:data.startDate?{start:data.startDate}:null}}:{}),
+    ...(HAS_P4_FIELD?{'藝文起始進度':{number:data.p4start===''||data.p4start==null?null:Number(data.p4start)}}:{}),
   }});
 }
 async function createStudent(data){
@@ -787,6 +797,8 @@ async function createStudent(data){
   if(data.status) extra['狀態']={select:{name:String(data.status)}};
   if(HAS_BOOKING_FIELD) extra['排課方式']={select:{name:data.booking||'每週固定'}};
   if(HAS_NICK_FIELD&&data.nick) extra['暱稱']={rich_text:[{text:{content:String(data.nick)}}]};
+  if(HAS_START_FIELD&&data.startDate) extra['開始上課日']={date:{start:data.startDate}};
+  if(HAS_P4_FIELD&&data.p4start!==''&&data.p4start!=null) extra['藝文起始進度']={number:Number(data.p4start)};
   await notionAPI('PATCH',`/pages/${result.id}`,{properties:extra});
   return result;
 }
@@ -2217,8 +2229,38 @@ async function querySalary(){
   }while(cursor&&++guard<20);
   return out.map(p=>({id:p.id,name:gp(p,'名稱','title'),date:gp(p,'日期','date'),place:gp(p,'地點','select'),type:gp(p,'類型','select'),amount:gp(p,'金額','number'),note:gp(p,'備註','rich_text')}));
 }
+// ── 教室設定（Notion）：依生效日取當時的規則 ──
+const DB_PLACES='3edd68e58caf8006b128e85e4f2c490d';
+let placeRules=null,placeRulesAt=0;
+async function loadPlaceRules(force){
+  if(placeRules&&!force&&Date.now()-placeRulesAt<5*60000) return placeRules;
+  try{
+    let out=[],cursor=null,guard=0;
+    do{const body={page_size:100};if(cursor)body.start_cursor=cursor;
+      const d=await notionAPI('POST',`/databases/${DB_PLACES}/query`,body);
+      out=out.concat(d.results||[]);cursor=d.has_more?d.next_cursor:null;}while(cursor&&++guard<10);
+    placeRules=out.map(p=>({place:(gp(p,'地點','title')||'').trim(),rate:gp(p,'時薪','number')||0,from:gp(p,'生效日','date')||'2000-01-01',
+      method:gp(p,'發薪方式','select')||'',payDay:gp(p,'發薪日','number')||0,note:gp(p,'備註','rich_text')||''})).filter(r=>r.place);
+    placeRulesAt=Date.now();
+  }catch(e){console.warn('placeRules',e.message);if(!placeRules)placeRules=[];}
+  return placeRules;
+}
+function ruleFor(place,ds){
+  const list=(placeRules||[]).filter(r=>r.place===place);
+  if(list.length){
+    const d=ds||twToday();
+    const ok=list.filter(r=>r.from<=d).sort((a,b)=>a.from<b.from?1:-1);
+    const r=ok[0]||list.sort((a,b)=>a.from<b.from?-1:1)[0];
+    return{rate:r.rate,payDay:r.method==='次月固定日'?r.payDay:0,per4:r.method==='滿四堂',manual:r.method==='手動'||!r.rate,from:r.from};
+  }
+  return PAY_RULES[place]||null;
+}
+function rulePlaces(){
+  const fromDb=[...new Set((placeRules||[]).map(r=>r.place))];
+  return fromDb.length?fromDb:Object.keys(PAY_RULES);
+}
 function lessonRate(e,place){
-  const rule=PAY_RULES[place];if(!rule||!rule.rate) return 0;
+  const rule=ruleFor(place,evParts(e.start.dateTime).date);if(!rule||!rule.rate) return 0;
   if(isSub(e)) return rule.rate;
   const s=students.find(x=>x.id===e.extendedProperties?.private?.studentId);
   return s&&s.rate?s.rate:rule.rate;
@@ -2316,6 +2358,7 @@ async function renderSalary(silent){
     <button style="${nb}" onclick="shiftSalary(1)">›</button></div>`;
   wrap.innerHTML=head+`<div class="rec-empty">計算中…</div>`;
   try{
+    await loadPlaceRules();
     const startAll='2025-01-01';
     const [lessonsAll,rows]=await Promise.all([
       gcalAll([['timeMin',twISO(startAll,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
@@ -2328,11 +2371,11 @@ async function renderSalary(silent){
     const P=p=>places[p]=places[p]||{place:p,lessons:0,subs:0,hours:0,pay:0,extra:[],per4:[]};
     // 一般教室：當月上過的課
     lessons.filter(inMonth).forEach(e=>{
-      const pl=lessonPlace(e);const rule=PAY_RULES[pl];if(!rule||rule.per4||rule.manual)return;
+      const pl=lessonPlace(e);const rule=ruleFor(pl,evParts(e.start.dateTime).date);if(!rule||rule.per4||rule.manual)return;
       const x=P(pl);isSub(e)?x.subs++:x.lessons++;x.hours+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000;x.pay+=lessonPay(e,pl);
     });
     // 藝文：每位學生各自滿四堂發一次（依日曆紀錄累計）
-    const per4Place=Object.keys(PAY_RULES).find(k=>PAY_RULES[k].per4);
+    const per4Place=rulePlaces().find(k=>ruleFor(k,first)?.per4);
     if(per4Place){
       const by={};
       lessons.filter(e=>lessonPlace(e)===per4Place).forEach(e=>{const k=isSub(e)?'代:'+(e.extendedProperties.private.subStudent||''):e.extendedProperties.private.studentId;(by[k]=by[k]||[]).push(e);});
@@ -2340,13 +2383,18 @@ async function renderSalary(silent){
       Object.entries(by).forEach(([k,arr])=>{
         arr.sort((a,b)=>a.start.dateTime<b.start.dateTime?-1:1);
         const name=k.startsWith('代:')?k.slice(2)+'（代）':(students.find(s=>s.id===k)?.name||'?');
-        for(let i=3;i<arr.length;i+=4){
+        const off=k.startsWith('代:')?0:((students.find(s=>s.id===k)?.p4start||0)%4);
+        for(let i=0;i<arr.length;i++){
+          if((off+i+1)%4!==0) continue;
           const done=arr[i];if(!inMonth(done))continue;
-          const grp=arr.slice(i-3,i+1);const pay=grp.reduce((a,e)=>a+lessonPay(e,per4Place),0);
-          x.lessons+=4;x.hours+=grp.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);x.pay+=pay;
+          const grp=arr.slice(Math.max(0,i-3),i+1);
+          const unit=lessonPay(done,per4Place);
+          const pay=grp.reduce((a,e)=>a+lessonPay(e,per4Place),0)+(4-grp.length)*unit; // 同步前已上的堂數用同價補算
+          const h=grp.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0)+(4-grp.length)*((new Date(done.end.dateTime)-new Date(done.start.dateTime))/3600000);
+          x.lessons+=4;x.hours+=h;x.pay+=pay;
           x.per4.push({name,date:evParts(done.start.dateTime).date,pay});
         }
-        const prog=arr.length%4;
+        const prog=(off+arr.length)%4;
         if(prog&&evParts(arr[arr.length-1].start.dateTime).date>=first) x.per4.push({name,progress:prog});
       });
       if(x.per4.length||x.pay) places[per4Place]=x;
@@ -2359,7 +2407,7 @@ async function renderSalary(silent){
       if(!x){const y2=P(r.place);y2.hist=true;y2.pay+=r.amount||0;}
       else if(x.hist) x.pay+=r.amount||0;
     });
-    const order=[...Object.keys(PAY_RULES),'其他'];
+    const order=[...rulePlaces(),'其他'];
     const list=Object.values(places).sort((a,b)=>order.indexOf(a.place)-order.indexOf(b.place));
     const total=list.reduce((a,x)=>a+x.pay,0);
     const paidRows=rows.filter(r=>r.type==='入帳'&&(r.name||'').startsWith(mk));
@@ -2375,7 +2423,7 @@ async function renderSalary(silent){
     html+=pieHtml(list);
     if(!list.length) html+=`<div class="rec-empty">這個月沒有收入紀錄</div>`;
     list.forEach(x=>{
-      const rule=PAY_RULES[x.place]||{};
+      const rule=ruleFor(x.place,addDays(next,-1))||{};
       const paid=paidRows.filter(r=>r.place===x.place).reduce((a,r)=>a+(r.amount||0),0);
       const paidR=paidRows.find(r=>r.place===x.place);
       const due=rule.payDay?`預計 ${ny}/${nm}/${rule.payDay} 發薪`:rule.per4?'每位學生滿四堂發':'手動';
@@ -2436,7 +2484,7 @@ function deletePaid(){
 function openIncome(){
   document.getElementById('inc-date').value=twToday();
   document.getElementById('inc-type').value='錄音案子';
-  document.getElementById('inc-place').innerHTML=[...Object.keys(PAY_RULES),'其他'].map(p=>`<option>${p}</option>`).join('');
+  document.getElementById('inc-place').innerHTML=[...rulePlaces(),'其他'].map(p=>`<option>${p}</option>`).join('');
   document.getElementById('inc-place').value='泰順錄音室';
   document.getElementById('inc-name').value='';document.getElementById('inc-amount').value='';document.getElementById('inc-note').value='';
   document.getElementById('sheet-income').classList.add('show');
@@ -2787,6 +2835,9 @@ function renderSettings(){
     setRow('🔁','代課紀錄',setStats.sub!=null?`本月 ${setStats.sub} 堂`:'代課與代課紀錄',"showPage('subs')")+
     setRow('📝','待寫紀錄','昨天、今天的上課紀錄',"showPage('todo')")+
     setRow('📍','教室','四間教室的學生與上課日',"showPage('rooms')"));
+  h+=setGroup('薪資規則',
+    (placeRules&&placeRules.length?rulePlaces().map(p=>{const r=ruleFor(p);return setRow('🏫',p.replace(' Yamaha',''),r?(r.manual?'手動記錄':`時薪 ${r.rate}・${r.per4?'滿四堂發':r.payDay?'次月 '+r.payDay+' 號發':''}`):'',null,'');}).join(''):setRow('🏫','教室設定','讀取中…',null,''))+
+    setRow('✏️','在 Notion 修改','調薪請新增一列並填生效日',"window.open('https://www.notion.so/${DB_PLACES}','_blank')"));
   h+=setGroup('提醒',
     setRow('📝','填寫上課紀錄・每日提醒',remOn?`每天 ${remT}・當天都寫完就不通知`:'已關閉',null,
       `<div style="display:flex;gap:6px;align-items:center;">${timeInput('reminder-time',remT,"if(reminderEv)setReminder(this.value)")}<button onclick="toggleReminder()" style="${smallBtn(remOn?'var(--accent)':'var(--text3)')}">${remOn?'開':'關'}</button></div>`)+
@@ -2806,6 +2857,7 @@ function renderSettings(){
 }
 let setStatsAt=0;
 async function loadSettingStats(){
+  if(!placeRules){loadPlaceRules().then(()=>{if(curPage==='settings')renderSettings();});}
   if(!gcalValid()||Date.now()-setStatsAt<60000) return;
   setStatsAt=Date.now();
   const td=twToday();const first=td.slice(0,8)+'01';
@@ -3267,6 +3319,7 @@ function renderDetail(id){
           <div class="dh-tags">
             <span class="dh-tag ${rc.tag}">${rc.icon} ${s.room}</span>
             ${isBooking(s)?`<span class="dh-tag" style="background:rgba(200,168,74,0.15);color:#c8a84a;">約課制</span>`:''}
+            ${s.startDate?`<span class="dh-tag" style="background:var(--card2);color:var(--text2);">📅 ${s.startDate.slice(0,7).replace('-','/')} 開始・${(()=>{const a=new Date(s.startDate+'T00:00:00Z'),b=new Date(twToday()+'T00:00:00Z');let m=(b.getUTCFullYear()-a.getUTCFullYear())*12+b.getUTCMonth()-a.getUTCMonth();if(b.getUTCDate()<a.getUTCDate())m--;m=Math.max(0,m);return m>=12?`${Math.floor(m/12)} 年${m%12?` ${m%12} 個月`:''}`:`${m} 個月`;})()}</span>`:''}
             <span class="dh-tag" style="background:var(--card2);color:var(--text2);">${isBooking(s)?'暫定':''}${s.day||'—'}</span>
             <span class="dh-tag" style="background:var(--card2);color:var(--text2);">🕐 ${s.time||'未設定'}${s.duration&&s.duration!=='60'?' · '+s.duration+'分':''}</span>
             <span class="dh-tag ${statusTag(s.status)}">${s.status}</span>
@@ -3472,6 +3525,8 @@ function openAddStudent(){
   document.getElementById('stu-status').value='正常上課';
   document.getElementById('stu-booking').value='每週固定';
   document.getElementById('stu-nick').value='';
+  document.getElementById('stu-start').value='';
+  document.getElementById('stu-p4').value='';
   document.getElementById('stu-note').value='';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -3489,6 +3544,8 @@ function editStudent(id){
   document.getElementById('stu-status').value=s.status||'正常上課';
   document.getElementById('stu-booking').value=s.booking||'每週固定';
   document.getElementById('stu-nick').value=s.nick||'';
+  document.getElementById('stu-start').value=s.startDate||'';
+  document.getElementById('stu-p4').value=s.p4start||'';
   document.getElementById('stu-note').value=s.note||'';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -3509,6 +3566,8 @@ async function saveStudent(){
       note:document.getElementById('stu-note').value.trim(),
       booking:document.getElementById('stu-booking').value,
       nick:document.getElementById('stu-nick').value.trim(),
+      startDate:document.getElementById('stu-start').value,
+      p4start:document.getElementById('stu-p4').value,
     };
     console.log('saving student:',data,editingStudentId);
     let sid=editingStudentId;
@@ -3517,6 +3576,7 @@ async function saveStudent(){
     await loadStudents();
     if(!HAS_BOOKING_FIELD&&data.booking==='約課制') showToast('⚠️ Notion 尚未建立「排課方式」欄位，約課制未儲存');
     if(!HAS_NICK_FIELD&&data.nick) showToast('⚠️ Notion 尚未建立「暱稱」欄位，暱稱未儲存');
+    if(!HAS_START_FIELD&&data.startDate) showToast('⚠️ Notion 尚未建立「開始上課日」欄位');
     if(gcalValid()){
       const st=students.find(x=>x.id===sid);
       if(st){try{await syncStudent(st);weekKey=null;todayKey=null;}catch(e){showToast('⚠️ 已存到 Notion，但日曆同步失敗：'+e.message);}}
