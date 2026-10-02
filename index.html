@@ -2541,6 +2541,24 @@ async function syncMonthToNotion(){
   showToast(`✅ 已同步 ${list.length} 筆到 Notion`);
 }
 
+// ── 每日填紀錄提醒：當天的課都寫完（或沒有課）就取消當天那次通知 ──
+let drBusy=false;
+async function syncDailyReminder(){
+  if(drBusy||!gcalValid()||!reminderEv||!todayEvents||todayKey!==twToday()) return;
+  drBusy=true;
+  try{
+    const td=twToday();
+    const lessons=todayEvents.filter(e=>evParts(e.start.dateTime).date===td&&!evState(e));
+    const allDone=lessons.every(e=>isSub(e)?!!e.extendedProperties?.private?.content:records.some(r=>r.studentId===e.extendedProperties?.private?.studentId&&r.date===td));
+    const d=await gcal('GET',`/events/${reminderEv.id}/instances`,null,[['timeMin',twISO(td,'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['showDeleted','true']]);
+    const inst=(d&&d.items||[])[0];
+    if(!inst) return;
+    if(allDone&&inst.status!=='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'cancelled'});
+    else if(!allDone&&inst.status==='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'confirmed'});
+  }catch(e){console.warn('dailyReminder',e.message);}
+  finally{drBusy=false;}
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -2671,6 +2689,7 @@ function renderHome(){
     <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
   document.getElementById('gcal-panel').innerHTML=NOTION_TOKEN?gcalPanelHtml():'';
   document.getElementById('unrec-card').innerHTML=NOTION_TOKEN?unrecHtml():'';
+  if(NOTION_TOKEN) syncDailyReminder();
   document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml()+(gcalValid()?formCardHtml():''):'';
   const cb=document.getElementById('cmd-box');
   if(!NOTION_TOKEN||!gcalValid()) cb.innerHTML='';
@@ -2704,10 +2723,10 @@ function renderSchedule(){
 
   const wrap=document.getElementById('schedule-wrap');
   wrap.style.padding='0';
-  wrap.style.overflowX='auto';
+  wrap.style.overflowX='visible';updateStickyVars();
 
   // 頂部星期列
-  const dayHeaders=`<div style="display:grid;grid-template-columns:36px repeat(7,1fr);background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;">
+  const dayHeaders=`<div style="display:grid;grid-template-columns:36px repeat(7,1fr);background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:var(--hdr,68px);z-index:30;">
     <div style="border-right:1px solid var(--border);"></div>
     ${DAYS.map((d,i)=>{
       const isT=weekDates[i]===today;
@@ -3074,7 +3093,7 @@ function confirmDeleteRecord(id){
     try{
       await deletePage(id);
       await loadRecords();
-      renderDetail(curStudent);
+      renderDetail(curStudent);syncDailyReminder();
       showToast('✅ 紀錄已刪除');
     }catch(e){showToast('❌ 刪除失敗');}
   });
@@ -3146,7 +3165,7 @@ async function saveRecord(){
     document.getElementById('rec-student').disabled=false;
     showToast(editingRecordId?'✅ 紀錄已更新！':'✅ 紀錄已儲存到 Notion！');
     if(curPage==='detail') renderDetail(curStudent);
-    if(curPage==='home') renderHome();
+    if(curPage==='home') renderHome(); else syncDailyReminder();
     if(curPage==='todo') renderTodo();
   }catch(e){showToast('❌ 儲存失敗，請重試');console.error(e);}
   btn.textContent='✅ 儲存';btn.disabled=false;
