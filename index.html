@@ -361,11 +361,8 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">生日</label><input class="form-input" type="date" id="stu-bd"></div>
-        <div class="form-group"><label class="form-label">家長稱呼</label><input class="form-input" id="stu-parent" placeholder="例：媽媽、王太太"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">家長電話</label><input class="form-input" type="tel" id="stu-pphone" placeholder="0912-345-678"></div>
-        <div class="form-group"><label class="form-label">家長 LINE</label><input class="form-input" id="stu-pline" placeholder="LINE ID 或加好友網址"></div>
+        <div class="form-group"><label class="form-label">家長 LINE</label><input class="form-input" id="stu-pline" placeholder="加好友網址"></div>
+        <input type="hidden" id="stu-parent"><input type="hidden" id="stu-pphone">
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">開始上課日</label><input class="form-input" type="date" id="stu-start"></div>
@@ -715,7 +712,7 @@ function gp(page,name,type){
 
 let HAS_BOOKING_FIELD=false,HAS_NICK_FIELD=false,HAS_START_FIELD=false,HAS_P4_FIELD=false;
 let FIELD_TYPES={};
-const CONTACT_FIELDS=['生日','家長','家長電話','家長LINE'];
+const CONTACT_FIELDS=['生日','家長LINE'];
 function gpText(page,name){
   const p=page.properties?.[name];if(!p) return '';
   if(p.type==='phone_number') return p.phone_number||'';
@@ -753,20 +750,8 @@ function lineUrl(v){
 }
 function contactHtml(s){
   const rows=[];
-  if(s.birthday){
-    const age=ageOf(s.birthday);const [y,m,d]=s.birthday.split('-');
-    const td=twToday();let next=`${td.slice(0,4)}-${m}-${d}`;if(next<td) next=`${parseInt(td.slice(0,4))+1}-${m}-${d}`;
-    const days=Math.round((new Date(next+'T00:00:00Z')-new Date(td+'T00:00:00Z'))/86400000);
-    rows.push(`<div style="font-size:13px;color:var(--text2);">🎂 ${y}/${parseInt(m)}/${parseInt(d)}・${age} 歲${days===0?'・<b style="color:#c8a84a;">今天生日 🎉</b>':days<=14?`・<span style="color:#c8a84a;">${days} 天後生日</span>`:''}</div>`);
-  }
-  if(s.parent||s.parentPhone||s.parentLine){
-    const tel=(s.parentPhone||'').replace(/[^\d+]/g,'');
-    rows.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:0;font-size:13px;color:var(--text2);">👪 ${esc(s.parent||'家長')}${s.parentPhone?`<span style="color:var(--text3);font-size:12px;">・${esc(s.parentPhone)}</span>`:''}</div>
-      ${tel?`<a href="tel:${tel}" style="${smallBtn('var(--text)')}text-decoration:none;">📞 撥打</a>`:''}
-      ${s.parentLine?`<a href="${lineUrl(s.parentLine)}" target="_blank" rel="noopener" style="${smallBtn('#06c755')}text-decoration:none;border-color:#06c755;">💬 LINE</a>`:''}
-    </div>`);
-  }
+  if(s.birthday){const [y,m,d]=s.birthday.split('-');rows.push(`<div style="font-size:13px;color:var(--text2);">🎂 ${y}/${parseInt(m)}/${parseInt(d)}・${ageOf(s.birthday)} 歲</div>`);}
+  if(s.parentLine) rows.push(`<div><a href="${lineUrl(s.parentLine)}" target="_blank" rel="noopener" style="${smallBtn('#06c755')}text-decoration:none;border-color:#06c755;display:inline-block;">💬 家長 LINE</a></div>`);
   if(!rows.length) return '';
   return`<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">${rows.join('')}</div>`;
 }
