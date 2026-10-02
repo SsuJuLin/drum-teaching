@@ -2429,7 +2429,7 @@ async function saveIncome(){
 // ── 泰順工時表單提醒：當天有泰順打卡 → 晚上提醒填表 ──
 const FORM_PLACE='泰順錄音室';
 const FORM_URL=''; // ← 公司工時表單網址（之後填入）
-const FORM_TIME='22:30';
+const FORM_TIME='23:30';
 async function syncFormReminder(ds){
   ds=ds||twToday();
   if(ds<twToday()) return; // 過去的日子不再提醒
@@ -2449,7 +2449,7 @@ async function syncFormReminder(ds){
       transparency:'transparent',reminders:{useDefault:false,overrides:[{method:'popup',minutes:0}]},
       extendedProperties:{private:{kind:'formReminder',date:ds}}};
     if(rem.length){
-      if(rem[0].summary!==summary) await ck('PATCH',`/events/${rem[0].id}`,{summary,description:body.description});
+      if(rem[0].summary!==summary||evParts(rem[0].start.dateTime).hhmm!==FORM_TIME) await ck('PATCH',`/events/${rem[0].id}`,{summary,description:body.description,start:body.start,end:body.end});
       for(const r of rem.slice(1)) await ck('DELETE',`/events/${r.id}`);
     }else await ck('POST','/events',body);
   }catch(e){console.warn('formReminder',e.message);}
@@ -2477,7 +2477,7 @@ async function markFormDone(){
 }
 
 // ── 打卡同步到 Notion「打卡紀錄」資料庫 ──
-const DB_CHECKIN=''; // ← 「打卡紀錄」資料庫 ID（之後填入）
+const DB_CHECKIN='3edd68e58caf8035bcebc789373ecc16'; // 「打卡紀錄」資料庫
 async function ckNotionUpsert(ev){
   if(!DB_CHECKIN||!ev||!ev.id) return;
   try{
