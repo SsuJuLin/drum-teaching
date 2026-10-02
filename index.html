@@ -1105,7 +1105,7 @@ async function renderLeaves(){
   const tabs=`<div class="filter-scroll" style="padding:0 0 12px;">
     <div class="chip${leavesTab==='mine'?' active':''}" onclick="setLeavesTab('mine')">我的請假</div>
     <div class="chip${leavesTab==='students'?' active':''}" onclick="setLeavesTab('students')">學生請假</div>
-    ${DB_CHANGES?`<button id="ch-sync-btn" onclick="syncChangesToNotion()" style="${smallBtn('var(--text2)')}margin-left:auto;">📤 同步異動到 Notion</button>`:''}</div>`;
+    ${DB_CHANGES?`<button id="ch-sync-btn" onclick="syncChangesToNotion()" style="${smallBtn('var(--text2)')}margin-left:auto;">${chSyncText||'📤 同步異動到 Notion'}</button>`:''}</div>`;
   if(!gcalValid()){wrap.innerHTML=tabs+`<div class="rec-empty">請先連接 Google 日曆<br><button class="add-rec-btn" style="margin-top:10px;" onclick="gcalConnect()">連接</button></div>`;return;}
   wrap.innerHTML=tabs+`<div class="rec-empty">讀取中…</div>`;
   const tab=leavesTab;
@@ -2198,7 +2198,7 @@ async function renderCheckins(){
         <div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:700;color:var(--text);">${fmtMD(a.date)}・${(p.place||'').replace(' Yamaha','')}</div>
         <div style="font-size:11px;color:var(--text3);">${a.hhmm}–${b.hhmm}・${((new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000).toFixed(1)}h・${p.how||''}</div></div>
         <div style="color:var(--text3);">›</div></div>`;}).join(''):`<div class="rec-empty">這個月還沒有打卡紀錄</div>`;
-    html+=`<div style="display:flex;justify-content:center;gap:8px;margin-top:14px;flex-wrap:wrap;"><button style="${smallBtn('var(--text2)')}" onclick="openPlaces()">📍 設定教室位置</button>${DB_CHECKIN?`<button id="ck-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncMonthToNotion()">📤 同步本月到 Notion</button>`:''}</div>`;
+    html+=`<div style="display:flex;justify-content:center;gap:8px;margin-top:14px;flex-wrap:wrap;"><button style="${smallBtn('var(--text2)')}" onclick="openPlaces()">📍 設定教室位置</button>${DB_CHECKIN?`<button id="ck-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncMonthToNotion()">${ckSyncText||'📤 同步本月到 Notion'}</button>`:''}</div>`;
     wrap.innerHTML=head+html;
   }catch(e){wrap.innerHTML=head+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
 }
@@ -2542,12 +2542,14 @@ async function ckNotionDelete(evId){
     for(const p of q.results||[]) await notionAPI('PATCH',`/pages/${p.id}`,{archived:true});
   }catch(e){console.warn('ckNotionDel',e.message);}
 }
+let ckSyncText='';
+function ckBtn(t){ckSyncText=t;const b=document.getElementById('ck-sync-btn');if(b)b.textContent=t||'📤 同步本月到 Notion';}
 async function syncMonthToNotion(){
   if(!DB_CHECKIN){showToast('尚未設定 Notion 打卡資料庫');return;}
-  const list=monthChecks||[];if(!list.length){showToast('這個月沒有打卡');return;}
-  const btn=document.getElementById('ck-sync-btn');
-  for(let i=0;i<list.length;i++){if(btn)btn.textContent=`同步中 ${i+1}/${list.length}`;await ckNotionUpsert(list[i]);}
-  if(btn)btn.textContent='📤 同步本月到 Notion';
+  if(ckSyncText){showToast('同步進行中，請稍候');return;}
+  const list=[...(monthChecks||[])];if(!list.length){showToast('這個月沒有打卡');return;}
+  for(let i=0;i<list.length;i++){ckBtn(`同步中 ${i+1}/${list.length}`);await ckNotionUpsert(list[i]);}
+  ckBtn('');
   showToast(`✅ 已同步 ${list.length} 筆到 Notion`);
 }
 
@@ -2621,10 +2623,13 @@ async function chTeacherLeave(ev){
   });
 }
 // 一次補齊過去的異動
+let chSyncText='';
+function chBtn(t){chSyncText=t;const b=document.getElementById('ch-sync-btn');if(b)b.textContent=t||'📤 同步異動到 Notion';}
 async function syncChangesToNotion(){
   if(!DB_CHANGES){showToast('尚未設定 Notion「課程異動」資料庫');return;}
   if(!gcalValid()){gcalConnect();return;}
-  const btn=document.getElementById('ch-sync-btn');
+  if(chSyncText){showToast('同步進行中，請稍候');return;}
+  const btn={set textContent(t){chBtn(t);}};
   try{
     if(btn) btn.textContent='讀取日曆中…';
     const items=(await gcalAll([['timeMin',YEARS2_AGO()],['timeMax',YEAR_AHEAD()],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']])).filter(e=>e.status!=='cancelled');
@@ -2642,7 +2647,7 @@ async function syncChangesToNotion(){
     for(let i=0;i<jobs.length;i++){if(btn)btn.textContent=`同步中 ${i+1}/${jobs.length}`;await jobs[i]();}
     showToast(`✅ 已同步 ${jobs.length} 筆異動到 Notion`);
   }catch(e){showToast('❌ '+e.message);}
-  if(btn) btn.textContent='📤 同步異動到 Notion';
+  chBtn('');
 }
 
 function gcalPanelHtml(){
