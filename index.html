@@ -31,7 +31,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
 .fab:active{transform:scale(0.96);}
 
 /* Content & Nav */
-.content{flex:1;overflow-y:auto;padding-bottom:calc(64px + var(--safe-bot) + 16px);}
+.content{flex:1;overflow:visible;padding-bottom:calc(64px + var(--safe-bot) + 16px);}
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;background:var(--surface);border-top:1px solid var(--border);padding-bottom:var(--safe-bot);display:flex;z-index:200;}
 .nav-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 4px 8px;gap:3px;cursor:pointer;border:none;background:none;font-family:inherit;color:var(--text3);transition:color 0.15s;}
 .nav-tab.active{color:var(--accent);}
@@ -250,8 +250,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div class="schedule-wrap" id="schedule-wrap"></div>
     </div>
     <div class="page" id="page-students">
+      <div id="stu-sticky" style="position:sticky;top:var(--hdr,68px);z-index:60;background:var(--bg);">
       <div style="padding:10px 16px 0;"><input id="stu-search" type="search" placeholder="🔍 搜尋學生" oninput="renderStudents()" autocomplete="off" style="width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:6px 10px;font-family:inherit;font-size:13px;color:var(--text);outline:none;"></div>
       <div class="filter-scroll" id="filter-scroll"></div>
+      </div>
       <div class="student-items" id="student-items"></div>
     </div>
     <div class="page" id="page-detail">
@@ -336,7 +338,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     <div class="sheet-handle"></div>
     <div class="sheet-title" id="stu-sheet-title">👤 新增學生</div>
     <div class="sheet-body">
-      <div class="form-group"><label class="form-label">姓名</label><input class="form-input" id="stu-name" placeholder="學生姓名"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">姓名</label><input class="form-input" id="stu-name" placeholder="學生姓名"></div>
+        <div class="form-group"><label class="form-label">暱稱（選填）</label><input class="form-input" id="stu-nick" placeholder="例：珩、小明"></div>
+      </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">教室</label>
           <select class="form-select" id="stu-room" onchange="updateDays()">
@@ -678,10 +683,11 @@ function gp(page,name,type){
   return '';
 }
 
-let HAS_BOOKING_FIELD=false;
+let HAS_BOOKING_FIELD=false,HAS_NICK_FIELD=false;
 async function loadStudents(){
   const pages=await queryDB(DB_STUDENTS,null,[{property:'學生',direction:'ascending'}]);
   HAS_BOOKING_FIELD=pages.some(p=>p.properties&&('排課方式' in p.properties));
+  HAS_NICK_FIELD=pages.some(p=>p.properties&&('暱稱' in p.properties));
   students=pages.map((p,i)=>({
     id:p.id,
     name:gp(p,'學生','title'),
@@ -692,6 +698,7 @@ async function loadStudents(){
     status:gp(p,'狀態','select'),
     booking:gp(p,'排課方式','select')||'每週固定',
     rate:gp(p,'特別時薪','number')||0,
+    nick:gp(p,'暱稱','rich_text')||'',
     note:gp(p,'備註','rich_text'),
     photo:gp(p,'照片','files'),
     color:COLORS[i%COLORS.length],
@@ -745,6 +752,7 @@ async function updateStudent(id,data){
     '狀態':{select:{name:data.status}},
     '備註':{rich_text:[{text:{content:String(data.note||'')}}]},
     ...(HAS_BOOKING_FIELD?{'排課方式':{select:{name:data.booking||'每週固定'}}}:{}),
+    ...(HAS_NICK_FIELD?{'暱稱':{rich_text:[{text:{content:String(data.nick||'')}}]}}:{}),
   }});
 }
 async function createStudent(data){
@@ -760,6 +768,7 @@ async function createStudent(data){
   if(data.note) extra['備註']={rich_text:[{text:{content:String(data.note)}}]};
   if(data.status) extra['狀態']={select:{name:String(data.status)}};
   if(HAS_BOOKING_FIELD) extra['排課方式']={select:{name:data.booking||'每週固定'}};
+  if(HAS_NICK_FIELD&&data.nick) extra['暱稱']={rich_text:[{text:{content:String(data.nick)}}]};
   await notionAPI('PATCH',`/pages/${result.id}`,{properties:extra});
   return result;
 }
@@ -1458,8 +1467,15 @@ function findTimes(text){
   }
   return out.sort((a,b)=>a.i-b.i);
 }
+function nicksOf(s){return (s.nick||'').split(/[\s、,，\/]+/).map(cleanName).filter(Boolean);}
 function findStudent(text){
   const t=cleanName(text);
+  // 先用暱稱找（取最長的符合）
+  let nk=[];students.forEach(s=>nicksOf(s).forEach(n=>{if(t.includes(n))nk.push({s,len:n.length});}));
+  if(nk.length){nk.sort((a,b)=>b.len-a.len);const top=nk.filter(x=>x.len===nk[0].len&&cleanName(x.s.name)!=='');const uniq=[...new Set(top.map(x=>x.s))];
+    const full=students.find(s=>cleanName(s.name)&&t.includes(cleanName(s.name)));
+    if(full&&cleanName(full.name).length>=nk[0].len) return full;
+    if(uniq.length===1) return uniq[0];}
   let c=students.filter(s=>cleanName(s.name)&&t.includes(cleanName(s.name)));
   if(!c.length) c=students.filter(s=>{const n=cleanName(s.name);return n.length>=3&&t.includes(n.slice(-2));});
   if(!c.length) return null;
@@ -1676,7 +1692,7 @@ async function buildExport(){
       out.push(`${mdShort(day)} ${wd}`);
       const all=lessons.filter(e=>evParts(e.start.dateTime).date===day)
         .map(e=>{const p=evParts(e.start.dateTime);const dur=Math.round((new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000);
-          return{st:p.min,en:p.min+dur,name:isSub(e)?'代'+(e.extendedProperties.private.subStudent||''):shortName(evName(e)),moved:e.extendedProperties.private.moved==='1',empty:!!evState(e)};})
+          return{st:p.min,en:p.min+dur,name:isSub(e)?'代'+(e.extendedProperties.private.subStudent||''):(()=>{const st=students.find(x=>x.id===e.extendedProperties.private.studentId);const n=st&&(st.nick||'').split(/[\s、,，\/]+/)[0];return n||shortName(evName(e));})(),moved:e.extendedProperties.private.moved==='1',empty:!!evState(e)};})
         .sort((a,b)=>a.st-b.st||a.en-b.en);
       // 請假、停課的時段顯示成空白；若已被別人的課佔用就不列
       const act=all.filter(x=>!x.empty||!all.some(y=>!y.empty&&y.st<x.en&&y.en>x.st));
@@ -1849,6 +1865,15 @@ function recordFromToday(sid,hhmm,ds,withLast){
   document.getElementById('rec-time').value=hhmm;document.getElementById('rec-date').value=ds;
   if(withLast){const l=lastRecordBefore(sid,ds);if(l&&l.content)document.getElementById('rec-content').value=l.content;}
 }
+function linkify(t){
+  return esc(t).replace(/(https?:\/\/[^\s<]+)/g,u=>{
+    const raw=u.replace(/&amp;/g,'&');
+    const yt=/youtu\.?be/.test(raw);
+    let label=yt?'▶ YouTube':raw.replace(/^https?:\/\/(www\.)?/,'');
+    if(!yt&&label.length>32) label=label.slice(0,30)+'…';
+    return`<a href="${u}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#5aa9e6;text-decoration:underline;word-break:break-all;">${label}</a>`;
+  });
+}
 function esc(t){return String(t||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function unrecHtml(){
   const wrapS='margin:0 16px 10px;';
@@ -1871,16 +1896,16 @@ function unrecHtml(){
     const tag=st==='leave'?'<span style="color:var(--text3);">🚫 請假</span>':st==='teacherOff'?'<span style="color:var(--text3);">⛔ 停課</span>'
       :rec?'<span style="color:var(--accent);">✅ 已記錄</span>':ended?'<span style="color:#c8a84a;font-weight:700;">待紀錄</span>':'<span style="color:var(--text3);">尚未上課</span>';
     const last=!sub&&sid?lastRecordBefore(sid,td):null;
-    const sub2=sub?`代課${pr.subTeacher?'・'+esc(pr.subTeacher):''}${pr.room?'・'+esc(pr.room):''}`:last?`上次 ${mdShort(last.date)}：${esc((last.content||'（沒有內容）').split('\n')[0])}`:'還沒有上課紀錄';
+    const sub2=sub?`代課${pr.subTeacher?'（'+esc(pr.subTeacher)+'）':''}`:last?`上次上課：${mdShort(last.date)}${last.stars?' ⭐':''}`:'還沒有紀錄';
     const open=todayOpen===e.id&&!st;
     let detail='';
     if(open){
       if(sub){
         detail=`<div style="padding:4px 0 10px 50px;"><button class="add-rec-btn" onclick="event.stopPropagation();openSubRecord('${e.id}')">${rec?'查看代課紀錄':'＋ 寫代課紀錄'}</button></div>`;
       }else{
-        const f=(l,v)=>v?`<div style="margin-bottom:6px;"><div style="font-size:10px;color:var(--text3);">${l}</div><div style="font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;">${esc(v)}</div></div>`:'';
-        detail=`<div style="padding:4px 0 10px 50px;" onclick="event.stopPropagation()">
-          ${last?`<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">上一堂 ${fmtMD(last.date)}${last.stars?' ⭐':''}</div>${f('上課內容',last.content)}${f('上課狀況',last.status)}${f('其他事項',last.note)}`:'<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">還沒有上課紀錄</div>'}
+        const f=(l,v)=>v?`<div style="margin-bottom:6px;font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;">${l?`<span style="color:var(--text3);">${l}：</span>`:''}${linkify(v)}</div>`:'';
+        detail=`<div style="padding:2px 0 10px 50px;" onclick="event.stopPropagation()">
+          ${last?`${f('',last.content)}${f('狀況',last.status)}${f('其他',last.note)}`:'<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">還沒有上課紀錄</div>'}
           ${rec?`<button class="add-rec-btn" onclick="editRecord('${rec.id}')">查看今天的紀錄</button>`
             :`<button class="add-rec-btn" onclick="recordFromToday('${sid}','${p.hhmm}','${td}',true)">＋ 新增紀錄${last&&last.content?'（帶入上次內容）':''}</button>`}
         </div>`;
@@ -1890,8 +1915,7 @@ function unrecHtml(){
       <div onclick="${st?'':`toggleToday('${e.id}')`}" style="display:flex;gap:10px;padding:9px 0;align-items:flex-start;${st?'opacity:0.5;':'cursor:pointer;'}">
         <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${p.hhmm}</div>
         <div style="flex:1;min-width:0;">
-          <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${esc(name)}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
-          <div style="font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">${sub2}</div>
+          <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${esc(name)}</div><div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">・${sub2}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
         </div>
       </div>${detail}</div>`;
   }).join('')+`</div>`;
@@ -2041,7 +2065,7 @@ function checkinHtml(){
   const noCoords=!Object.keys(placeCoords).length;
   h+=`<div style="${box}">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:0;font-size:13px;color:var(--text2);white-space:nowrap;">🕘 今日打卡${(todayChecks||[]).length?'':'・<span style="color:var(--text3);">尚未打卡</span>'}</div>
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🕘 打卡${(todayChecks||[]).length?'':'・<span style="color:var(--text3);">未打卡</span>'}</div>
       <button style="${smallBtn('var(--text2)')}" onclick="openCheckinEdit()">＋ 手動</button>
       <button style="${smallBtn('var(--text3)')}" onclick="showPage('checkins')">紀錄 ›</button>
       <button style="${smallBtn('var(--accent)')}" onclick="showPage('salary')">💰 薪資</button>
@@ -2622,7 +2646,7 @@ function showPage(id){
   if(id==='checkins') renderCheckins();
   if(id==='salary') renderSalary();
   if(id==='schedule') renderSchedule();
-  if(id==='students') renderStudents();
+  if(id==='students'){renderStudents();if(!navFromPop)requestAnimationFrame(()=>requestAnimationFrame(scrollStudentsToToday));else updateStickyVars();}
   document.getElementById('main-content').scrollTop=0;
 }
 
@@ -2825,7 +2849,7 @@ function renderStudents(){
 
   let list=students;
   const q=cleanName(document.getElementById('stu-search')?.value||'');
-  if(q) list=students.filter(s=>cleanName(s.name).includes(q));
+  if(q) list=students.filter(s=>cleanName(s.name).includes(q)||nicksOf(s).some(n=>n.includes(q)));
   else if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status!=='正常上課');
   else if(stuFilter==='約課制') list=students.filter(s=>isBooking(s)&&s.status!=='不上課');
   else if(stuFilter!=='全部') list=students.filter(s=>s.room===stuFilter&&s.status==='正常上課');
@@ -2840,8 +2864,8 @@ function renderStudents(){
   document.getElementById('student-items').innerHTML=grouped.length===0?
     `<div style="text-align:center;padding:40px;color:var(--text3);">沒有學生</div>`:
     grouped.map(g=>`
-      <div style="margin-bottom:4px;">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;padding:0 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px;">${g.day}</div>
+      <div style="margin-bottom:4px;" id="stu-day-${DAYS.indexOf(g.day)}">
+        <div style="position:sticky;top:calc(var(--hdr,68px) + var(--stuf,90px));z-index:50;background:var(--bg);font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;padding:6px 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px;">${g.day}</div>
         ${g.students.map(s=>`<div class="student-row${isInactive(s)?' inactive':''}" onclick="openDetail('${s.id}','students')" style="margin-bottom:6px;">
           <div class="s-avatar">${avatarHtml(s,44)}</div>
           <div class="s-info">
@@ -2856,6 +2880,21 @@ function renderStudents(){
       </div>`).join('');
 }
 function setStuFilter(f){stuFilter=f;renderStudents();}
+function updateStickyVars(){
+  const h=document.querySelector('.top-header');const f=document.getElementById('stu-sticky');
+  if(h) document.documentElement.style.setProperty('--hdr',h.offsetHeight+'px');
+  if(f&&f.offsetHeight) document.documentElement.style.setProperty('--stuf',f.offsetHeight+'px');
+}
+window.addEventListener('resize',updateStickyVars);
+function scrollStudentsToToday(){
+  updateStickyVars();
+  const ti=(twNow().getUTCDay()+6)%7;
+  let el=null;for(let i=0;i<7&&!el;i++) el=document.getElementById('stu-day-'+((ti+i)%7));
+  if(!el){window.scrollTo(0,0);return;}
+  const off=(document.querySelector('.top-header')?.offsetHeight||0)+(document.getElementById('stu-sticky')?.offsetHeight||0);
+  const y=el.getBoundingClientRect().top+window.scrollY-off;
+  window.scrollTo({top:Math.max(0,y),behavior:'auto'});
+}
 
 function goBack(fallback){
   if(history.state&&history.state.page&&history.length>1) history.back();
@@ -2958,9 +2997,9 @@ function renderDetail(id){
           <button class="rec-more-btn" onclick="showRecMenu(event,'${r.id}')">···</button>
         </div>
         <div class="rec-body">
-          ${r.content?`<div class="rec-field"><div class="rf-label">內容</div><div class="rf-val">${r.content}</div></div>`:''}
-          ${r.status?`<div class="rec-field"><div class="rf-label">狀況</div><div class="rf-val">${r.status}</div></div>`:''}
-          ${r.note?`<div class="rec-field"><div class="rf-label">其他</div><div class="rf-val">${r.note}</div></div>`:''}
+          ${r.content?`<div class="rec-field"><div class="rf-label">內容</div><div class="rf-val" style="white-space:pre-wrap;">${linkify(r.content)}</div></div>`:''}
+          ${r.status?`<div class="rec-field"><div class="rf-label">狀況</div><div class="rf-val" style="white-space:pre-wrap;">${linkify(r.status)}</div></div>`:''}
+          ${r.note?`<div class="rec-field"><div class="rf-label">其他</div><div class="rf-val" style="white-space:pre-wrap;">${linkify(r.note)}</div></div>`:''}
         </div>
       </div>`).join('')
     }</div>`;
@@ -3125,6 +3164,7 @@ function openAddStudent(){
   document.getElementById('stu-duration').value='60';
   document.getElementById('stu-status').value='正常上課';
   document.getElementById('stu-booking').value='每週固定';
+  document.getElementById('stu-nick').value='';
   document.getElementById('stu-note').value='';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -3141,6 +3181,7 @@ function editStudent(id){
   document.getElementById('stu-duration').value=s.duration||'60';
   document.getElementById('stu-status').value=s.status||'正常上課';
   document.getElementById('stu-booking').value=s.booking||'每週固定';
+  document.getElementById('stu-nick').value=s.nick||'';
   document.getElementById('stu-note').value=s.note||'';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -3160,6 +3201,7 @@ async function saveStudent(){
       status:document.getElementById('stu-status').value,
       note:document.getElementById('stu-note').value.trim(),
       booking:document.getElementById('stu-booking').value,
+      nick:document.getElementById('stu-nick').value.trim(),
     };
     console.log('saving student:',data,editingStudentId);
     let sid=editingStudentId;
@@ -3167,6 +3209,7 @@ async function saveStudent(){
     else sid=(await createStudent(data)).id;
     await loadStudents();
     if(!HAS_BOOKING_FIELD&&data.booking==='約課制') showToast('⚠️ Notion 尚未建立「排課方式」欄位，約課制未儲存');
+    if(!HAS_NICK_FIELD&&data.nick) showToast('⚠️ Notion 尚未建立「暱稱」欄位，暱稱未儲存');
     if(gcalValid()){
       const st=students.find(x=>x.id===sid);
       if(st){try{await syncStudent(st);weekKey=null;todayKey=null;}catch(e){showToast('⚠️ 已存到 Notion，但日曆同步失敗：'+e.message);}}
