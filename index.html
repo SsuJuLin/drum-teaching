@@ -1948,11 +1948,13 @@ function hhmmOf(ms){return evParts(new Date(ms).toISOString()).hhmm;}
 function isoTW(ms){return new Date(ms+TW_MS).toISOString().slice(0,19)+'+08:00';}
 async function createCheckin(place,startMs,endMs,how){
   if(endMs<=startMs) endMs=startMs+60*60000;
-  await ck('POST','/events',{
+  const created=await ck('POST','/events',{
     summary:`📍 ${place}`,location:place,description:how,
     start:{dateTime:isoTW(startMs),timeZone:'Asia/Taipei'},end:{dateTime:isoTW(endMs),timeZone:'Asia/Taipei'},
     extendedProperties:{private:{kind:'checkin',place,how}},
   });
+  if(place===FORM_PLACE) await syncFormReminder(evParts(isoTW(startMs)).date);
+  await ckNotionUpsert(created);
 }
 function distM(a,b){
   const R=6371000,toR=x=>x*Math.PI/180;
@@ -2007,7 +2009,8 @@ async function quickCheckin(place,mode){
 async function checkout(evId){
   try{
     const now=Date.now();
-    await ck('PATCH',`/events/${evId}`,{end:{dateTime:isoTW(now),timeZone:'Asia/Taipei'}});
+    const upd=await ck('PATCH',`/events/${evId}`,{end:{dateTime:isoTW(now),timeZone:'Asia/Taipei'}});
+    await syncFormReminder(twToday());await ckNotionUpsert(upd);
     await loadTodayChecks();showToast(`✅ 下班 ${hhmmOf(now)}`);
   }catch(e){showToast('❌ '+e.message);}
   if(curPage==='home') renderHome();
@@ -2099,8 +2102,9 @@ async function saveCheckinEdit(){
   let st=new Date(twISO(ds,a)).getTime(),en=new Date(twISO(ds,b)).getTime();
   if(en<=st) en+=24*3600000;
   try{
-    if(ckEditId) await ck('PATCH',`/events/${ckEditId}`,{summary:`📍 ${place}`,location:place,start:{dateTime:isoTW(st),timeZone:'Asia/Taipei'},end:{dateTime:isoTW(en),timeZone:'Asia/Taipei'},extendedProperties:{private:{kind:'checkin',place,how:'手動修改'}}});
+    if(ckEditId) await ckNotionUpsert(await ck('PATCH',`/events/${ckEditId}`,{summary:`📍 ${place}`,location:place,start:{dateTime:isoTW(st),timeZone:'Asia/Taipei'},end:{dateTime:isoTW(en),timeZone:'Asia/Taipei'},extendedProperties:{private:{...((todayChecks||[]).concat(monthChecks||[]).find(x=>x.id===ckEditId)?.extendedProperties?.private||{}),kind:'checkin',place,how:'手動修改'}}}));
     else await createCheckin(place,st,en,'手動打卡');
+    if(ckEditId) await syncFormReminder(ds);
     closeSheet('sheet-checkin');showToast('✅ 已儲存');
     await loadTodayChecks();if(curPage==='home')renderHome();if(curPage==='checkins')renderCheckins();
   }catch(e){showToast('❌ '+e.message);}
@@ -2108,7 +2112,7 @@ async function saveCheckinEdit(){
 function deleteCheckin(){
   if(!ckEditId)return;
   showConfirm('刪除打卡','確定刪除這筆打卡紀錄？',async()=>{
-    try{await ck('DELETE',`/events/${ckEditId}`);closeSheet('sheet-checkin');showToast('✅ 已刪除');
+    try{await ck('DELETE',`/events/${ckEditId}`);await ckNotionDelete(ckEditId);await syncFormReminder(document.getElementById('ck-date').value);closeSheet('sheet-checkin');showToast('✅ 已刪除');
       await loadTodayChecks();if(curPage==='home')renderHome();if(curPage==='checkins')renderCheckins();}
     catch(e){showToast('❌ '+e.message);}
   });
@@ -2160,7 +2164,7 @@ async function renderCheckins(){
         <div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:700;color:var(--text);">${fmtMD(a.date)}・${(p.place||'').replace(' Yamaha','')}</div>
         <div style="font-size:11px;color:var(--text3);">${a.hhmm}–${b.hhmm}・${((new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000).toFixed(1)}h・${p.how||''}</div></div>
         <div style="color:var(--text3);">›</div></div>`;}).join(''):`<div class="rec-empty">這個月還沒有打卡紀錄</div>`;
-    html+=`<div style="text-align:center;margin-top:14px;"><button style="${smallBtn('var(--text2)')}" onclick="openPlaces()">📍 設定教室位置</button></div>`;
+    html+=`<div style="display:flex;justify-content:center;gap:8px;margin-top:14px;flex-wrap:wrap;"><button style="${smallBtn('var(--text2)')}" onclick="openPlaces()">📍 設定教室位置</button>${DB_CHECKIN?`<button id="ck-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncMonthToNotion()">📤 同步本月到 Notion</button>`:''}</div>`;
     wrap.innerHTML=head+html;
   }catch(e){wrap.innerHTML=head+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
 }
@@ -2422,6 +2426,94 @@ async function saveIncome(){
   catch(e){showToast('❌ '+e.message);}
 }
 
+// ── 泰順工時表單提醒：當天有泰順打卡 → 晚上提醒填表 ──
+const FORM_PLACE='泰順錄音室';
+const FORM_URL=''; // ← 公司工時表單網址（之後填入）
+const FORM_TIME='22:30';
+async function syncFormReminder(ds){
+  ds=ds||twToday();
+  if(ds<twToday()) return; // 過去的日子不再提醒
+  try{
+    const d=await ck('GET','/events',null,[['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true'],['orderBy','startTime']]);
+    const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+    const checks=items.filter(e=>e.extendedProperties?.private?.kind==='checkin'&&e.extendedProperties?.private?.place===FORM_PLACE);
+    const rem=items.filter(e=>e.extendedProperties?.private?.kind==='formReminder');
+    const done=checks.some(e=>e.extendedProperties?.private?.formDone==='1');
+    if(!checks.length||done){for(const r of rem) await ck('DELETE',`/events/${r.id}`);return;}
+    const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
+    const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
+    const summary=`⚠️ 記得填泰順時數（${span}・${hrs.toFixed(1)}h）`;
+    const start=twISO(ds,FORM_TIME);
+    const body={summary,description:(FORM_URL?FORM_URL+'\n':'')+'由爵士鼓教學系統建立',
+      start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,10),timeZone:'Asia/Taipei'},
+      transparency:'transparent',reminders:{useDefault:false,overrides:[{method:'popup',minutes:0}]},
+      extendedProperties:{private:{kind:'formReminder',date:ds}}};
+    if(rem.length){
+      if(rem[0].summary!==summary) await ck('PATCH',`/events/${rem[0].id}`,{summary,description:body.description});
+      for(const r of rem.slice(1)) await ck('DELETE',`/events/${r.id}`);
+    }else await ck('POST','/events',body);
+  }catch(e){console.warn('formReminder',e.message);}
+}
+function formCardHtml(){
+  const checks=(todayChecks||[]).filter(e=>e.extendedProperties?.private?.place===FORM_PLACE);
+  if(!checks.length) return '';
+  const done=checks.some(e=>e.extendedProperties?.private?.formDone==='1');
+  const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;';
+  const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
+  const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0).toFixed(1);
+  if(done) return`<div style="${box}font-size:13px;color:var(--accent);">✅ 泰順時數已填（${span}・${hrs}h）</div>`;
+  return`<div style="${box}border-color:rgba(200,168,74,0.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:0;font-size:13px;color:#c8a84a;font-weight:700;">⚠️ 記得填泰順時數<div style="font-size:11px;color:var(--text3);font-weight:400;margin-top:2px;">今天 ${span}・${hrs}h・${FORM_TIME} 會提醒</div></div>
+    ${FORM_URL?`<a href="${FORM_URL}" target="_blank" rel="noopener" style="${smallBtn('var(--text)')}text-decoration:none;">開表單</a>`:''}
+    <button style="${smallBtn('var(--accent)')}" onclick="markFormDone()">已填</button></div>`;
+}
+async function markFormDone(){
+  const checks=(todayChecks||[]).filter(e=>e.extendedProperties?.private?.place===FORM_PLACE);
+  try{
+    for(const e of checks) await ck('PATCH',`/events/${e.id}`,{extendedProperties:{private:{...(e.extendedProperties?.private||{}),formDone:'1'}}});
+    await syncFormReminder(twToday());await loadTodayChecks();showToast('✅ 已標記為填寫完成');
+  }catch(e){showToast('❌ '+e.message);}
+  if(curPage==='home') renderHome();
+}
+
+// ── 打卡同步到 Notion「打卡紀錄」資料庫 ──
+const DB_CHECKIN=''; // ← 「打卡紀錄」資料庫 ID（之後填入）
+async function ckNotionUpsert(ev){
+  if(!DB_CHECKIN||!ev||!ev.id) return;
+  try{
+    const pr=ev.extendedProperties?.private||{};
+    const a=evParts(ev.start.dateTime);
+    const hrs=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/360000)/10;
+    const props={
+      '名稱':{title:[{text:{content:`${mdShort(a.date)} ${(pr.place||'').replace(' Yamaha','')}`}}]},
+      '日期':{date:{start:ev.start.dateTime,end:ev.end.dateTime,time_zone:null}},
+      '地點':{select:{name:pr.place||'其他'}},
+      '時數':{number:hrs},
+      '方式':{select:{name:pr.how||'手動打卡'}},
+      '日曆ID':{rich_text:[{text:{content:ev.id}}]},
+    };
+    const q=await notionAPI('POST',`/databases/${DB_CHECKIN}/query`,{filter:{property:'日曆ID',rich_text:{equals:ev.id}},page_size:1});
+    const hit=q.results&&q.results[0];
+    if(hit) await notionAPI('PATCH',`/pages/${hit.id}`,{properties:props});
+    else await notionAPI('POST','/pages',{parent:{database_id:DB_CHECKIN},properties:props});
+  }catch(e){console.warn('ckNotion',e.message);}
+}
+async function ckNotionDelete(evId){
+  if(!DB_CHECKIN||!evId) return;
+  try{
+    const q=await notionAPI('POST',`/databases/${DB_CHECKIN}/query`,{filter:{property:'日曆ID',rich_text:{equals:evId}},page_size:5});
+    for(const p of q.results||[]) await notionAPI('PATCH',`/pages/${p.id}`,{archived:true});
+  }catch(e){console.warn('ckNotionDel',e.message);}
+}
+async function syncMonthToNotion(){
+  if(!DB_CHECKIN){showToast('尚未設定 Notion 打卡資料庫');return;}
+  const list=monthChecks||[];if(!list.length){showToast('這個月沒有打卡');return;}
+  const btn=document.getElementById('ck-sync-btn');
+  for(let i=0;i<list.length;i++){if(btn)btn.textContent=`同步中 ${i+1}/${list.length}`;await ckNotionUpsert(list[i]);}
+  if(btn)btn.textContent='📤 同步本月到 Notion';
+  showToast(`✅ 已同步 ${list.length} 筆到 Notion`);
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -2552,7 +2644,7 @@ function renderHome(){
     <div class="stat-card"><div class="stat-num">${students.filter(s=>s.status==="正常上課").length}</div><div class="stat-label">正常上課人數</div></div>`;
   document.getElementById('gcal-panel').innerHTML=NOTION_TOKEN?gcalPanelHtml():'';
   document.getElementById('unrec-card').innerHTML=NOTION_TOKEN?unrecHtml():'';
-  document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
+  document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml()+(gcalValid()?formCardHtml():''):'';
   const cb=document.getElementById('cmd-box');
   if(!NOTION_TOKEN||!gcalValid()) cb.innerHTML='';
   else if(!document.getElementById('cmd-input')) cb.innerHTML=cmdBoxHtml();
