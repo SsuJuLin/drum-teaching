@@ -2468,7 +2468,7 @@ function formCardHtml(){
   return`<div style="${box}border-color:rgba(200,168,74,0.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
     <div style="flex:1;min-width:0;font-size:13px;color:#c8a84a;font-weight:700;">⚠️ 記得填泰順時數<div style="font-size:11px;color:var(--text3);font-weight:400;margin-top:2px;">今天 ${span}・${formHoursText(hrs)}・${FORM_TIME} 會提醒</div></div>
     ${FORM_URL?`<a href="${FORM_URL}" target="_blank" rel="noopener" style="${smallBtn('var(--text)')}text-decoration:none;">開表單</a>`:''}
-    <button style="${smallBtn('var(--accent)')}" onclick="markFormDone()">已填</button></div>`;
+    <button class="add-rec-btn" onclick="markFormDone()">完成</button></div>`;
 }
 async function markFormDone(){
   const checks=(todayChecks||[]).filter(e=>e.extendedProperties?.private?.place===FORM_PLACE);
