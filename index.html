@@ -2430,6 +2430,9 @@ async function saveIncome(){
 const FORM_PLACE='泰順錄音室';
 const FORM_URL=''; // ← 公司工時表單網址（之後填入）
 const FORM_TIME='23:30';
+const FORM_COMMUTE=2; // 泰順另計通勤時數
+function fmtH(h){return (Math.round(h*10)/10).toString()+'h';}
+function formHoursText(h){return `${fmtH(h)}+${FORM_COMMUTE}h通勤=${fmtH(h+FORM_COMMUTE)}`;}
 async function syncFormReminder(ds){
   ds=ds||twToday();
   if(ds<twToday()) return; // 過去的日子不再提醒
@@ -2442,7 +2445,7 @@ async function syncFormReminder(ds){
     if(!checks.length||done){for(const r of rem) await ck('DELETE',`/events/${r.id}`);return;}
     const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
     const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
-    const summary=`⚠️ 記得填泰順時數（${span}・${hrs.toFixed(1)}h）`;
+    const summary=`⚠️ 記得填泰順時數（${span}・${formHoursText(hrs)}）`;
     const start=twISO(ds,FORM_TIME);
     const body={summary,description:(FORM_URL?FORM_URL+'\n':'')+'由爵士鼓教學系統建立',
       start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,10),timeZone:'Asia/Taipei'},
@@ -2460,10 +2463,10 @@ function formCardHtml(){
   const done=checks.some(e=>e.extendedProperties?.private?.formDone==='1');
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;';
   const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
-  const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0).toFixed(1);
-  if(done) return`<div style="${box}font-size:13px;color:var(--accent);">✅ 泰順時數已填（${span}・${hrs}h）</div>`;
+  const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
+  if(done) return`<div style="${box}font-size:13px;color:var(--accent);">✅ 泰順時數已填（${span}・${formHoursText(hrs)}）</div>`;
   return`<div style="${box}border-color:rgba(200,168,74,0.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <div style="flex:1;min-width:0;font-size:13px;color:#c8a84a;font-weight:700;">⚠️ 記得填泰順時數<div style="font-size:11px;color:var(--text3);font-weight:400;margin-top:2px;">今天 ${span}・${hrs}h・${FORM_TIME} 會提醒</div></div>
+    <div style="flex:1;min-width:0;font-size:13px;color:#c8a84a;font-weight:700;">⚠️ 記得填泰順時數<div style="font-size:11px;color:var(--text3);font-weight:400;margin-top:2px;">今天 ${span}・${formHoursText(hrs)}・${FORM_TIME} 會提醒</div></div>
     ${FORM_URL?`<a href="${FORM_URL}" target="_blank" rel="noopener" style="${smallBtn('var(--text)')}text-decoration:none;">開表單</a>`:''}
     <button style="${smallBtn('var(--accent)')}" onclick="markFormDone()">已填</button></div>`;
 }
