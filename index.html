@@ -230,9 +230,9 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     </div>
   </div>
   <!-- 漂浮按鈕 -->
-  <button class="fab" id="header-btn" onclick="openLeave()">🏖 請假</button>
+  <button class="fab" id="header-btn" onclick="openLeave()">＋ 請假</button>
   <div id="dial" style="display:none;position:fixed;right:20px;bottom:calc(136px + var(--safe-bot));z-index:300;flex-direction:column;align-items:flex-end;gap:10px;">
-    <button class="fab" style="position:static;background:var(--card2);color:#c8a84a;border:1px solid var(--border2);" onclick="toggleDial(false);openSubNew()">🔁 代課</button>
+    <button class="fab" style="position:static;" onclick="toggleDial(false);openSubNew()">🔁 代課</button>
     <button class="fab" style="position:static;" onclick="openAddLesson()">＋ 加課</button>
   </div>
   <div class="content" id="main-content">
@@ -358,6 +358,14 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div class="form-row">
         <div class="form-group"><label class="form-label">姓名</label><input class="form-input" id="stu-name" placeholder="學生姓名"></div>
         <div class="form-group"><label class="form-label">暱稱（選填）</label><input class="form-input" id="stu-nick" placeholder="例：珩、小明"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">生日</label><input class="form-input" type="date" id="stu-bd"></div>
+        <div class="form-group"><label class="form-label">家長稱呼</label><input class="form-input" id="stu-parent" placeholder="例：媽媽、王太太"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">家長電話</label><input class="form-input" type="tel" id="stu-pphone" placeholder="0912-345-678"></div>
+        <div class="form-group"><label class="form-label">家長 LINE</label><input class="form-input" id="stu-pline" placeholder="LINE ID 或加好友網址"></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">開始上課日</label><input class="form-input" type="date" id="stu-start"></div>
@@ -706,12 +714,69 @@ function gp(page,name,type){
 }
 
 let HAS_BOOKING_FIELD=false,HAS_NICK_FIELD=false,HAS_START_FIELD=false,HAS_P4_FIELD=false;
+let FIELD_TYPES={};
+const CONTACT_FIELDS=['生日','家長','家長電話','家長LINE'];
+function gpText(page,name){
+  const p=page.properties?.[name];if(!p) return '';
+  if(p.type==='phone_number') return p.phone_number||'';
+  if(p.type==='url') return p.url||'';
+  if(p.type==='email') return p.email||'';
+  if(p.type==='title') return p.title?.map(r=>r.plain_text).join('')||'';
+  return p.rich_text?.map(r=>r.plain_text).join('')||'';
+}
+function textProp(name,val){
+  const t=FIELD_TYPES[name];val=String(val||'').trim();
+  if(t==='phone_number') return{phone_number:val||null};
+  if(t==='url') return{url:val||null};
+  if(t==='email') return{email:val||null};
+  return{rich_text:val?[{text:{content:val}}]:[]};
+}
+function contactProps(data){
+  const o={};
+  if(FIELD_TYPES['生日']) o['生日']={date:data.birthday?{start:data.birthday}:null};
+  if(FIELD_TYPES['家長']) o['家長']=textProp('家長',data.parent);
+  if(FIELD_TYPES['家長電話']) o['家長電話']=textProp('家長電話',data.parentPhone);
+  if(FIELD_TYPES['家長LINE']) o['家長LINE']=textProp('家長LINE',data.parentLine);
+  return o;
+}
+function ageOf(bd){
+  if(!bd) return null;const t=twToday();
+  let a=parseInt(t.slice(0,4))-parseInt(bd.slice(0,4));
+  if(t.slice(5)<bd.slice(5)) a--;
+  return a;
+}
+function lineUrl(v){
+  v=(v||'').trim();if(!v) return '';
+  if(/^https?:\/\//.test(v)) return v;
+  if(v.startsWith('@')) return 'https://line.me/R/ti/p/'+encodeURIComponent(v);
+  return 'https://line.me/ti/p/~'+encodeURIComponent(v);
+}
+function contactHtml(s){
+  const rows=[];
+  if(s.birthday){
+    const age=ageOf(s.birthday);const [y,m,d]=s.birthday.split('-');
+    const td=twToday();let next=`${td.slice(0,4)}-${m}-${d}`;if(next<td) next=`${parseInt(td.slice(0,4))+1}-${m}-${d}`;
+    const days=Math.round((new Date(next+'T00:00:00Z')-new Date(td+'T00:00:00Z'))/86400000);
+    rows.push(`<div style="font-size:13px;color:var(--text2);">🎂 ${y}/${parseInt(m)}/${parseInt(d)}・${age} 歲${days===0?'・<b style="color:#c8a84a;">今天生日 🎉</b>':days<=14?`・<span style="color:#c8a84a;">${days} 天後生日</span>`:''}</div>`);
+  }
+  if(s.parent||s.parentPhone||s.parentLine){
+    const tel=(s.parentPhone||'').replace(/[^\d+]/g,'');
+    rows.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:0;font-size:13px;color:var(--text2);">👪 ${esc(s.parent||'家長')}${s.parentPhone?`<span style="color:var(--text3);font-size:12px;">・${esc(s.parentPhone)}</span>`:''}</div>
+      ${tel?`<a href="tel:${tel}" style="${smallBtn('var(--text)')}text-decoration:none;">📞 撥打</a>`:''}
+      ${s.parentLine?`<a href="${lineUrl(s.parentLine)}" target="_blank" rel="noopener" style="${smallBtn('#06c755')}text-decoration:none;border-color:#06c755;">💬 LINE</a>`:''}
+    </div>`);
+  }
+  if(!rows.length) return '';
+  return`<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">${rows.join('')}</div>`;
+}
 async function loadStudents(){
   const pages=await queryDB(DB_STUDENTS,null,[{property:'學生',direction:'ascending'}]);
   HAS_BOOKING_FIELD=pages.some(p=>p.properties&&('排課方式' in p.properties));
   HAS_NICK_FIELD=pages.some(p=>p.properties&&('暱稱' in p.properties));
   HAS_START_FIELD=pages.some(p=>p.properties&&('開始上課日' in p.properties));
   HAS_P4_FIELD=pages.some(p=>p.properties&&('藝文起始進度' in p.properties));
+  FIELD_TYPES={};CONTACT_FIELDS.forEach(n=>{const pg=pages.find(p=>p.properties&&p.properties[n]);if(pg)FIELD_TYPES[n]=pg.properties[n].type;});
   students=pages.map((p,i)=>({
     id:p.id,
     name:gp(p,'學生','title'),
@@ -725,6 +790,10 @@ async function loadStudents(){
     nick:gp(p,'暱稱','rich_text')||'',
     startDate:gp(p,'開始上課日','date')||'',
     p4start:gp(p,'藝文起始進度','number')||0,
+    birthday:gp(p,'生日','date')||'',
+    parent:gpText(p,'家長'),
+    parentPhone:gpText(p,'家長電話'),
+    parentLine:gpText(p,'家長LINE'),
     note:gp(p,'備註','rich_text'),
     photo:gp(p,'照片','files'),
     color:COLORS[i%COLORS.length],
@@ -781,6 +850,7 @@ async function updateStudent(id,data){
     ...(HAS_NICK_FIELD?{'暱稱':{rich_text:[{text:{content:String(data.nick||'')}}]}}:{}),
     ...(HAS_START_FIELD?{'開始上課日':{date:data.startDate?{start:data.startDate}:null}}:{}),
     ...(HAS_P4_FIELD?{'藝文起始進度':{number:data.p4start===''||data.p4start==null?null:Number(data.p4start)}}:{}),
+    ...contactProps(data),
   }});
 }
 async function createStudent(data){
@@ -799,6 +869,7 @@ async function createStudent(data){
   if(HAS_NICK_FIELD&&data.nick) extra['暱稱']={rich_text:[{text:{content:String(data.nick)}}]};
   if(HAS_START_FIELD&&data.startDate) extra['開始上課日']={date:{start:data.startDate}};
   if(HAS_P4_FIELD&&data.p4start!==''&&data.p4start!=null) extra['藝文起始進度']={number:Number(data.p4start)};
+  Object.assign(extra,contactProps(data));
   await notionAPI('PATCH',`/pages/${result.id}`,{properties:extra});
   return result;
 }
@@ -2719,9 +2790,9 @@ function checkinHtml(){
       <div style="flex:1;min-width:0;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;" onclick="openCheckinEdit('${e.id}')">🕘 ${(p.place||'').replace(' Yamaha','')} <span style="color:var(--text3);">${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}</span></div>
       <button style="${smallBtn('var(--text2)')}" onclick="checkout('${e.id}')">下班</button></div>`;
   }).join('');
-  const label=nearPlace&&!checkedPlace(nearPlace)?`📍 在${nearPlace.replace(' Yamaha','')}打卡`:'📍 打卡';
+  const label=nearPlace&&!checkedPlace(nearPlace)?`＋ 📍 在${nearPlace.replace(' Yamaha','')}打卡`:'＋ 📍 打卡';
   const btn=`<button class="add-rec-btn" onclick="smartCheckin()">${label}</button>`;
-  if(!rows) return`<div style="${box}display:flex;align-items:center;gap:8px;"><div style="flex:1;font-size:13px;color:var(--text3);">🕘 未打卡</div>${btn}</div>`;
+  if(!rows) return`<div style="${box}display:flex;align-items:center;gap:8px;"><div style="flex:1;font-size:13px;color:var(--text3);">🕘 今日未打卡</div>${btn}</div>`;
   return`<div style="${box}">${rows}${nearPlace&&!checkedPlace(nearPlace)?`<div style="margin-top:4px;">${btn}</div>`:''}</div>`;
 }
 async function smartCheckin(){
@@ -2742,7 +2813,7 @@ let dialOpen=false;
 function toggleDial(force){
   dialOpen=force===undefined?!dialOpen:force;
   document.getElementById('dial').style.display=dialOpen?'flex':'none';
-  document.getElementById('header-btn').textContent=dialOpen?'✕ 關閉':'排課';
+  document.getElementById('header-btn').textContent=dialOpen?'✕ 關閉':'＋ 排課';
 }
 function openAddLesson(){
   toggleDial(false);
@@ -2990,8 +3061,8 @@ function showPage(id){
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
   if(id==='students'){btn.style.display='';btn.textContent='＋ 學生';btn.onclick=()=>openAddStudent();}
-  else if(id==='home'){btn.style.display='';btn.textContent='🏖 請假';btn.onclick=()=>openLeave();}
-  else if(id==='schedule'){btn.style.display='';btn.textContent='排課';btn.onclick=()=>toggleDial();}
+  else if(id==='home'){btn.style.display='';btn.textContent='＋ 請假';btn.onclick=()=>openLeave();}
+  else if(id==='schedule'){btn.style.display='';btn.textContent='＋ 排課';btn.onclick=()=>toggleDial();}
   else{btn.style.display='none';}
   if(id==='home'){renderHome();if(gcalValid()&&todayKey!==twToday())loadToday().then(()=>{if(curPage==='home')renderHome();});}
   if(id==='leaves') renderLeaves();
@@ -3324,6 +3395,7 @@ function renderDetail(id){
             <span class="dh-tag" style="background:var(--card2);color:var(--text2);">🕐 ${s.time||'未設定'}${s.duration&&s.duration!=='60'?' · '+s.duration+'分':''}</span>
             <span class="dh-tag ${statusTag(s.status)}">${s.status}</span>
           </div>
+          ${contactHtml(s)}
         </div>
       </div>
       ${s.note?`<div class="dh-note">📝 ${s.note}</div>`:''}
@@ -3527,6 +3599,7 @@ function openAddStudent(){
   document.getElementById('stu-nick').value='';
   document.getElementById('stu-start').value='';
   document.getElementById('stu-p4').value='';
+  ['stu-bd','stu-parent','stu-pphone','stu-pline'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('stu-note').value='';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -3546,6 +3619,7 @@ function editStudent(id){
   document.getElementById('stu-nick').value=s.nick||'';
   document.getElementById('stu-start').value=s.startDate||'';
   document.getElementById('stu-p4').value=s.p4start||'';
+  document.getElementById('stu-bd').value=s.birthday||'';document.getElementById('stu-parent').value=s.parent||'';document.getElementById('stu-pphone').value=s.parentPhone||'';document.getElementById('stu-pline').value=s.parentLine||'';
   document.getElementById('stu-note').value=s.note||'';
   document.getElementById('sheet-student').classList.add('show');
 }
@@ -3568,6 +3642,10 @@ async function saveStudent(){
       nick:document.getElementById('stu-nick').value.trim(),
       startDate:document.getElementById('stu-start').value,
       p4start:document.getElementById('stu-p4').value,
+      birthday:document.getElementById('stu-bd').value,
+      parent:document.getElementById('stu-parent').value.trim(),
+      parentPhone:document.getElementById('stu-pphone').value.trim(),
+      parentLine:document.getElementById('stu-pline').value.trim(),
     };
     console.log('saving student:',data,editingStudentId);
     let sid=editingStudentId;
@@ -3577,6 +3655,8 @@ async function saveStudent(){
     if(!HAS_BOOKING_FIELD&&data.booking==='約課制') showToast('⚠️ Notion 尚未建立「排課方式」欄位，約課制未儲存');
     if(!HAS_NICK_FIELD&&data.nick) showToast('⚠️ Notion 尚未建立「暱稱」欄位，暱稱未儲存');
     if(!HAS_START_FIELD&&data.startDate) showToast('⚠️ Notion 尚未建立「開始上課日」欄位');
+    const miss=CONTACT_FIELDS.filter(n=>!FIELD_TYPES[n]&&({'生日':data.birthday,'家長':data.parent,'家長電話':data.parentPhone,'家長LINE':data.parentLine})[n]);
+    if(miss.length) showToast(`⚠️ Notion 尚未建立「${miss.join('、')}」欄位`);
     if(gcalValid()){
       const st=students.find(x=>x.id===sid);
       if(st){try{await syncStudent(st);weekKey=null;todayKey=null;}catch(e){showToast('⚠️ 已存到 Notion，但日曆同步失敗：'+e.message);}}
