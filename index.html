@@ -642,6 +642,23 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
   </div>
 </div>
 
+<!-- IMPORT SHEET -->
+<div class="overlay" id="sheet-import">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="imp-title">📥 匯入上課紀錄</div>
+    <div class="sheet-body">
+      <div style="font-size:12px;color:var(--text3);margin:-6px 0 8px;line-height:1.6;">日期單獨一行（2026/2/7），下面幾行是那堂的上課內容。含「代課…不用輸入」的段落會自動略過。</div>
+      <textarea class="form-textarea" id="imp-text" style="min-height:180px;" placeholder="2026/2/7&#10;Rock School: Go your own way 原速&#10;&#10;2026/2/28&#10;…" oninput="previewImport()"></textarea>
+      <div id="imp-preview" style="margin-top:10px;max-height:260px;overflow-y:auto;"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-import')">取消</button>
+      <button class="btn-save" id="imp-btn" onclick="runImport()">📥 匯入</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -2970,6 +2987,52 @@ function changeToken(){
   },'更換');
 }
 
+// ── 批次匯入上課紀錄（貼上「日期＋內容」格式）──
+let importSid=null,importItems=[];
+function openImport(sid){
+  importSid=sid;const s=students.find(x=>x.id===sid);
+  document.getElementById('imp-title').textContent=`📥 ${s?s.name:''}｜匯入上課紀錄`;
+  document.getElementById('imp-text').value='';document.getElementById('imp-preview').innerHTML='';
+  document.getElementById('sheet-import').classList.add('show');
+}
+function parseImport(text){
+  const out=[];let cur=null;
+  text.split(/\r?\n/).forEach(raw=>{
+    const line=raw.trim();
+    const m=line.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+    if(m){cur={date:`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`,lines:[]};out.push(cur);return;}
+    if(!cur||!line) return;
+    if(/代課.*(不用|不需要)輸入/.test(line)){cur=null;return;}
+    cur.lines.push(line);
+  });
+  return out.filter(x=>x.lines.length).map(x=>({date:x.date,content:x.lines.join('\n')}));
+}
+function previewImport(){
+  importItems=parseImport(document.getElementById('imp-text').value);
+  const exist=new Set(records.filter(r=>r.studentId===importSid).map(r=>r.date));
+  const box=document.getElementById('imp-preview');
+  if(!importItems.length){box.innerHTML=`<div style="font-size:12px;color:var(--text3);">還沒讀到紀錄，日期請單獨一行，例如 2026/2/7</div>`;return;}
+  const dup=importItems.filter(x=>exist.has(x.date)).length;
+  box.innerHTML=`<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">讀到 <b>${importItems.length}</b> 堂${dup?`・其中 ${dup} 堂那天已有紀錄，會略過`:''}</div>`+
+    importItems.map(x=>`<div style="font-size:12px;padding:5px 0;border-top:1px solid var(--border);${exist.has(x.date)?'opacity:0.4;':''}"><b style="color:var(--text);">${x.date.replace(/-0?/g,'/').replace(/^(\d{4})\//,'$1/')}</b><div style="color:var(--text3);white-space:pre-wrap;">${esc(x.content)}</div></div>`).join('');
+}
+async function runImport(){
+  if(!importItems.length) previewImport();
+  const s=students.find(x=>x.id===importSid);if(!s||!importItems.length)return;
+  const exist=new Set(records.filter(r=>r.studentId===importSid).map(r=>r.date));
+  const todo=importItems.filter(x=>!exist.has(x.date));
+  if(!todo.length){showToast('沒有需要匯入的新紀錄');return;}
+  const btn=document.getElementById('imp-btn');btn.disabled=true;
+  let ok=0;
+  for(let i=0;i<todo.length;i++){
+    btn.textContent=`匯入中 ${i+1}/${todo.length}`;
+    try{await createRecord({studentId:s.id,date:todo[i].date,time:s.time?pad5(s.time):'',content:todo[i].content,status:'',note:'',stars:0});ok++;}catch(e){console.error(e);}
+  }
+  btn.disabled=false;btn.textContent='📥 匯入';
+  await loadRecords();closeSheet('sheet-import');renderDetail(s.id);
+  showToast(ok===todo.length?`✅ 已匯入 ${ok} 堂紀錄`:`⚠️ 匯入 ${ok}／${todo.length} 堂`);
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -3426,7 +3489,7 @@ function renderDetail(id){
     <div id="leave-records"></div>
     <div class="rec-section-head">
       <div class="sec-line"><div class="section-title">上課紀錄</div><div class="rec-count">・${recs.length} 筆・由新到舊</div></div>
-      <div style="display:flex;gap:6px;flex-shrink:0;"><button onclick="openParentExport('${id}')" style="${smallBtn('var(--text2)')}">匯出</button><button class="add-rec-btn" onclick="openAddRecord('${id}')">＋ 新增</button></div>
+      <div style="display:flex;gap:6px;flex-shrink:0;"><button onclick="openImport('${id}')" style="${smallBtn('var(--text2)')}">匯入</button><button onclick="openParentExport('${id}')" style="${smallBtn('var(--text2)')}">匯出</button><button class="add-rec-btn" onclick="openAddRecord('${id}')">＋ 新增</button></div>
     </div>
     <div class="rec-list">${recs.length===0?
       `<div class="rec-empty">📝 還沒有上課紀錄</div>`:
