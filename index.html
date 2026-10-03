@@ -891,8 +891,52 @@ const GCAL_SCOPE='https://www.googleapis.com/auth/calendar.events';
 let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
+// ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
+const AUTH_WORKER='https://notion-proxy.doristtn.workers.dev';
+let gRT=null,gCodeClient=null,gRefreshing=null,gLegacy=false;
+try{gRT=localStorage.getItem('g_rt');}catch(e){}
+function setGToken(t,exp){
+  gToken=t;gExp=Date.now()+(exp||3600)*1000;
+  try{localStorage.setItem('gcal_token',JSON.stringify({t:gToken,e:gExp}));}catch(e){}
+}
+async function refreshGToken(){
+  if(!gRT) return false;
+  if(gRefreshing) return gRefreshing;
+  gRefreshing=(async()=>{
+    try{
+      const r=await fetch(AUTH_WORKER+'/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:gRT})});
+      const d=await r.json();
+      if(d.access_token){setGToken(d.access_token,d.expires_in);return true;}
+      if(d.error==='invalid_grant'){gRT=null;try{localStorage.removeItem('g_rt');}catch(e){}}
+      return false;
+    }catch(e){return false;}
+    finally{setTimeout(()=>{gRefreshing=null;},0);}
+  })();
+  return gRefreshing;
+}
+async function ensureGcal(){if(gcalValid()) return true;return refreshGToken();}
+setInterval(()=>{if(gRT&&gExp-Date.now()<10*60000) refreshGToken();},5*60000);
 function gcalInit(){
   if(!window.google||!google.accounts||!google.accounts.oauth2){setTimeout(gcalInit,300);return;}
+  gCodeClient=google.accounts.oauth2.initCodeClient({
+    client_id:GCAL_CLIENT_ID,scope:GCAL_SCOPE,ux_mode:'popup',
+    callback:async(resp)=>{
+      if(resp.error){showToast('❌ Google 登入失敗：'+resp.error);return;}
+      try{
+        const r=await fetch(AUTH_WORKER+'/auth/exchange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:resp.code})});
+        const d=await r.json();
+        if(!d.access_token) throw new Error(d.detail||d.error||'exchange failed');
+        setGToken(d.access_token,d.expires_in);
+        if(d.refresh_token){gRT=d.refresh_token;try{localStorage.setItem('g_rt',gRT);}catch(e){}showToast('✅ 已連接 Google 日曆（長期登入）');}
+        else if(!gRT) showToast('⚠️ 已連接，但沒拿到長期登入憑證，請到 Google 帳戶移除授權後再連一次');
+        else showToast('✅ 已連接 Google 日曆');
+      }catch(e){
+        gLegacy=true;showToast('⚠️ 長期登入暫時無法使用，請再按一次「連接」');console.warn(e);
+        return;
+      }
+      weekKey=null;todayKey=null;onGcalChange();
+    }
+  });
   gTokenClient=google.accounts.oauth2.initTokenClient({
     client_id:GCAL_CLIENT_ID,scope:GCAL_SCOPE,
     callback:(resp)=>{
@@ -905,6 +949,7 @@ function gcalInit(){
   });
 }
 function gcalConnect(){
+  if(gCodeClient&&!gLegacy){gCodeClient.requestCode();return;}
   if(!gTokenClient){showToast('Google 元件載入中，請稍候再按一次');return;}
   gTokenClient.requestAccessToken({prompt:''});
 }
@@ -915,14 +960,19 @@ function onGcalChange(){
   if(curPage==='schedule') renderSchedule();
   if(curPage==='detail'&&curStudent) renderDetail(curStudent);
 }
-async function gcal(method,path,body,query,cal){
+async function gcal(method,path,body,query,cal,_retry){
+  if(!gcalValid()) await ensureGcal();
   if(!gcalValid()) throw new Error('Google 日曆未連接或已過期，請重新連接');
   let url=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal||GCAL_ID)}${path}`;
   if(query) url+='?'+new URLSearchParams(query).toString();
   const opts={method,headers:{'Authorization':`Bearer ${gToken}`}};
   if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
   const r=await fetch(url,opts);
-  if(r.status===401){gcalClear();onGcalChange();throw new Error('Google 授權已過期，請重新連接');}
+  if(r.status===401){
+    gToken=null;gExp=0;
+    if(!_retry&&gRT&&await refreshGToken()) return gcal(method,path,body,query,cal,true);
+    gcalClear();onGcalChange();throw new Error('Google 授權已過期，請重新連接');
+  }
   if(r.status===204||r.status===410) return null;
   if(!r.ok){let m=r.status;try{m=(await r.json()).error.message;}catch(e){}throw new Error('Google 日曆錯誤：'+(r.status===409?'409 already exists':m));}
   return r.json();
@@ -2157,7 +2207,7 @@ async function autoCheckin(force){
   autoBusy=false;
   if(curPage==='home') renderHome();
 }
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&NOTION_TOKEN&&gcalValid())autoCheckin();});
+document.addEventListener('visibilitychange',async()=>{if(document.visibilityState!=='visible'||!NOTION_TOKEN)return;const was=gcalValid();await ensureGcal();if(gcalValid()){if(!was)onGcalChange();autoCheckin();}});
 
 async function quickCheckin(place,mode){
   const span=todayPlaceSpans().find(x=>x.place===place);
@@ -2941,7 +2991,7 @@ function renderSettings(){
   h+=setGroup('打卡',
     setRow('📍','教室位置',`已設定 ${setCnt}／${PLACES.length}・在附近又有課會自動打卡`,'openPlaces()'));
   h+=setGroup('連線與同步',
-    setRow('📅','Google 日曆',g?'已連接':'未連接（約一小時需重新連接一次）',null,
+    setRow('📅','Google 日曆',g?(gRT?'已連接・長期登入':'已連接（約一小時需重新連接）'):(gRT?'重新取得授權中…':'未連接'),null,
       g?`<button id="sync-all-btn" style="${smallBtn('var(--text2)')}" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'同步全部'}</button>`:`<button class="add-rec-btn" onclick="gcalConnect()">連接</button>`)+
     setRow('📤','打卡同步到 Notion','把本月打卡補進 Notion',null,`<button style="${smallBtn('var(--text2)')}" onclick="settingsSyncChecks()">${ckSyncText||'同步本月'}</button>`)+
     setRow('📤','課程異動同步到 Notion','請假、停課、調課、補課、代課',null,`<button id="ch-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncChangesToNotion()">${chSyncText||'全部同步'}</button>`)+
@@ -3785,6 +3835,7 @@ async function init(){
   try{
     await Promise.all([loadStudents(),loadRecords()]);
     renderHome();
+    await ensureGcal();
     if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);renderHome();autoCheckin(true);}
     showToast('✅ 已連接 Notion');
   }catch(e){
