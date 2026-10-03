@@ -1029,6 +1029,20 @@ async function loadWeek(){
   }catch(e){weekEvents=null;weekKey=null;todayKey=null;showToast('❌ '+e.message);}
   weekLoading=false;
 }
+// 現在時間紅線（只在本週、今天那一欄）
+function nowLineHtml(){
+  const ROW_H=56,START_H=8,END_H=22;
+  if(weekOffset!==0) return '';
+  const n=twNow();const min=n.getUTCHours()*60+n.getUTCMinutes();
+  if(min<START_H*60||min>=END_H*60) return '';
+  const di=(n.getUTCDay()+6)%7;
+  const COL=`((100% - 36px) / 7)`;
+  const top=(min-START_H*60)/60*ROW_H;
+  return`<div style="position:absolute;top:${top}px;left:calc(36px + ${di} * ${COL});width:calc(${COL});height:0;border-top:2px solid #e5484d;z-index:20;pointer-events:none;">
+    <div style="position:absolute;left:-5px;top:-6px;width:10px;height:10px;border-radius:50%;background:#e5484d;"></div></div>`;
+}
+function updateNowLine(){const el=document.getElementById('now-line');if(el)el.innerHTML=nowLineHtml();}
+setInterval(()=>{if(curPage==='schedule')updateNowLine();},60000);
 function shiftWeek(n){weekOffset=n===0?0:weekOffset+n;renderSchedule();}
 // 課表（週）、打卡紀錄與薪資（月）左右滑動切換
 const SWIPE_PAGES={
@@ -3128,6 +3142,7 @@ function renderSchedule(){
   const wrap=document.getElementById('schedule-wrap');
   wrap.style.padding='0';
   wrap.style.overflowX='visible';updateStickyVars();
+  setTimeout(updateNowLine,0);
 
   // 頂部星期列
   const dayHeaders=`<div style="display:grid;grid-template-columns:36px repeat(7,1fr);background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:var(--hdr,68px);z-index:30;">
@@ -3205,7 +3220,7 @@ function renderSchedule(){
   const COL=`((100% - 36px) / 7)`;
   const leaveIdx=new Set();
   if(calReady) weekLeaves.forEach(ev=>leaveDays(ev).forEach(d=>{const i=weekDates.indexOf(d);if(i>=0)leaveIdx.add(i);}));
-  const leaveBlocks=[...leaveIdx].map(i=>`<div style="position:absolute;top:0;bottom:0;left:calc(36px + ${i} * ${COL});width:${COL};background:repeating-linear-gradient(45deg,rgba(200,168,74,0.10) 0 6px,transparent 6px 12px);border-left:1px solid rgba(200,168,74,0.35);z-index:1;pointer-events:none;"><div style="text-align:center;font-size:10px;font-weight:700;color:#c8a84a;padding-top:4px;">🏖 請假</div></div>`).join('');
+  const leaveBlocks=[...leaveIdx].map(i=>`<div style="position:absolute;top:0;bottom:0;left:calc(36px + ${i} * ${COL});width:calc(${COL});background:repeating-linear-gradient(45deg,rgba(200,168,74,0.10) 0 6px,transparent 6px 12px);border-left:1px solid rgba(200,168,74,0.35);z-index:1;pointer-events:none;"><div style="text-align:center;font-size:10px;font-weight:700;color:#c8a84a;padding-top:4px;">🏖 請假</div></div>`).join('');
   const studentBlocks=evs.map(e=>{
     const {s,dayIdx,norm,dur,k,n,booking,state}=e;
     const rc0=roomOf(s.room);
@@ -3257,6 +3272,7 @@ function renderSchedule(){
     <div style="position:relative;height:${totalH}px;overflow:hidden;">
       ${gridLines}
       ${leaveBlocks}
+      <div id="now-line"></div>
       ${studentBlocks}
     </div>
   </div>`;
