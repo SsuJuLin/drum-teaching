@@ -892,6 +892,7 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
+const APP_VERSION='2026.10.03-2';
 const AUTH_WORKER='https://notion-proxy.doristtn.workers.dev';
 let gRT=null,gCodeClient=null,gRefreshing=null,gLegacy=false;
 try{gRT=localStorage.getItem('g_rt');}catch(e){}
@@ -2992,11 +2993,11 @@ function renderSettings(){
     setRow('📍','教室位置',`已設定 ${setCnt}／${PLACES.length}・在附近又有課會自動打卡`,'openPlaces()'));
   h+=setGroup('連線與同步',
     setRow('📅','Google 日曆',g?(gRT?'已連接・長期登入':'已連接（約一小時需重新連接）'):(gRT?'重新取得授權中…':'未連接'),null,
-      g?`<button id="sync-all-btn" style="${smallBtn('var(--text2)')}" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'同步全部'}</button>`:`<button class="add-rec-btn" onclick="gcalConnect()">連接</button>`)+
+      g?`<div style="display:flex;gap:6px;">${gRT?'':`<button class="add-rec-btn" onclick="gcalConnect()">啟用長期登入</button>`}<button id="sync-all-btn" style="${smallBtn('var(--text2)')}" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'同步全部'}</button></div>`:`<button class="add-rec-btn" onclick="gcalConnect()">連接</button>`)+
     setRow('📤','打卡同步到 Notion','把本月打卡補進 Notion',null,`<button style="${smallBtn('var(--text2)')}" onclick="settingsSyncChecks()">${ckSyncText||'同步本月'}</button>`)+
     setRow('📤','課程異動同步到 Notion','請假、停課、調課、補課、代課',null,`<button id="ch-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncChangesToNotion()">${chSyncText||'全部同步'}</button>`)+
     setRow('🔑','更換 Notion 權杖','權杖重新產生後使用','changeToken()'));
-  h+=`<div style="text-align:center;font-size:11px;color:var(--text3);margin:24px 0 8px;">阿森Asen｜工作&爵士鼓教學系統</div>`;
+  h+=`<div style="text-align:center;font-size:11px;color:var(--text3);margin:24px 0 8px;">阿森Asen｜工作&爵士鼓教學系統<br>版本 ${APP_VERSION}</div>`;
   wrap.innerHTML=h;
   loadSettingStats();
 }
