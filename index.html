@@ -627,10 +627,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div id="paid-due" style="font-size:13px;color:var(--text3);margin:-6px 0 12px;"></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">實收金額</label><input class="form-input" type="number" inputmode="numeric" id="paid-amount"></div>
-        <div class="form-group"><label class="form-label">入帳日期</label><input class="form-input" type="date" id="paid-date"></div>
+        <div class="form-group"><label class="form-label">收到日期</label><input class="form-input" type="date" id="paid-date"></div>
       </div>
       <div class="form-group"><label class="form-label">備註</label><input class="form-input" id="paid-note" placeholder="例：少算一堂，已反映"></div>
-      <button id="paid-del" class="btn-cancel" style="width:100%;color:var(--red);" onclick="deletePaid()">刪除這筆入帳</button>
+      <button id="paid-del" class="btn-cancel" style="width:100%;color:var(--red);" onclick="deletePaid()">刪除這筆收款</button>
     </div>
     <div class="sheet-footer">
       <button class="btn-cancel" onclick="closeSheet('sheet-paid')">取消</button>
@@ -933,8 +933,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.04-5';
+const APP_VERSION='2026.10.04-6';
 const CHANGELOG=[
+  {v:'2026.10.04-6',items:['泰順按「下班」後 30 分鐘會提醒填時數，23:30 的提醒照舊，按「完成」兩個一起取消','薪資收款可以一個月記很多次，按鈕改名「＋ 記錄收款」，顯示「已收／應領」','藝文每筆「滿四堂」旁邊有自己的「收到了」按鈕','設定頁新增「薪資」區，放薪資紀錄和計薪規則；「說明」移到最下面']},
   {v:'2026.10.04-5',items:['課表新增「Week／Day」切換，Day 模式只看一天，顯示教室和狀態','設定頁新增「操作教學」，依功能分類、可搜尋，之後每次更新會一起修改']},
   {v:'2026.10.04-4',items:['學生新增「體驗」狀態：用加課排體驗課、照教室時薪計薪、學生頁可一鍵轉為正式學生','學生列表多一個「體驗」篩選，課表和今日課程以 🌱 標示','修正：老師請假期間，新學生或改時間學生的課不會自動停課；現在會自動補標，請假紀錄頁也有「重新套用」']},
   {v:'2026.10.04-3',items:['課表切換週變快：會先載入前後週，滑過去立刻顯示','課表日期列標示國定假日（紅色）和補班日（藍色）','設定頁的計薪規則收成一列，點進去看各教室規則和調薪紀錄','設定頁「紀錄」區新增「版本紀錄」']},
@@ -2342,7 +2343,8 @@ async function quickCheckin(place,mode){
 async function checkout(evId){
   try{
     const now=Date.now();
-    const upd=await ck('PATCH',`/events/${evId}`,{end:{dateTime:isoTW(now),timeZone:'Asia/Taipei'}});
+    const old=(todayChecks||[]).find(x=>x.id===evId);
+    const upd=await ck('PATCH',`/events/${evId}`,{end:{dateTime:isoTW(now),timeZone:'Asia/Taipei'},extendedProperties:{private:{...(old?.extendedProperties?.private||{}),checkedOut:'1'}}});
     await syncFormReminder(twToday());await ckNotionUpsert(upd);
     await loadTodayChecks();showToast(`✅ 下班 ${hhmmOf(now)}`);
   }catch(e){showToast('❌ '+e.message);}
@@ -2690,7 +2692,8 @@ async function renderSalary(silent){
     list.forEach(x=>{
       const rule=ruleFor(x.place,addDays(next,-1))||{};
       const paid=paidRows.filter(r=>r.place===x.place).reduce((a,r)=>a+(r.amount||0),0);
-      const paidR=paidRows.find(r=>r.place===x.place);
+      const prs=paidRows.filter(r=>r.place===x.place).sort((a,b)=>(a.date||'')<(b.date||'')?-1:1);
+      const paidR=prs[0];
       const due=rule.payDay?`預計 ${ny}/${nm}/${rule.payDay} 發薪`:rule.per4?'每位學生滿四堂發':'手動';
       const diff=paidR?paid-x.pay:0;
       html+=`<div class="rec-card" style="padding:12px;margin-bottom:10px;">
@@ -2699,11 +2702,20 @@ async function renderSalary(silent){
           <div style="font-size:16px;font-weight:800;color:var(--text);">${money(x.pay)}</div></div>
         ${x.hist?`<div style="font-size:11px;color:var(--text3);margin-top:2px;">歷史紀錄（依入帳金額）</div>`:''}
         <div style="font-size:11px;color:var(--text3);margin-top:2px;">${x.hist?'':x.lessons||x.subs?`上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${x.hours.toFixed(1)} 小時${rule.rate?`・時薪 ${rule.rate}`:''}・`:''}${due}</div>
-        ${x.per4.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.per4.map(p=>p.progress?`<span style="color:var(--text3);">${esc(p.name)} 進度 ${p.progress}/4</span>`:`✅ ${esc(p.name)} 滿四堂（${mdShort(p.date)}）${money(p.pay)}`).join('<br>')}</div>`:''}
+        ${x.per4.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.per4.map(p=>{
+          if(p.progress) return`<div style="color:var(--text3);">${esc(p.name)} 進度 ${p.progress}/4</div>`;
+          const tag=`${p.name}（${mdShort(p.date)}）`;
+          const got=prs.find(r=>(r.name||'').includes(tag));
+          return`<div style="display:flex;align-items:center;gap:8px;padding:2px 0;"><div style="flex:1;min-width:0;">✅ ${esc(p.name)} 滿四堂（${mdShort(p.date)}）${money(p.pay)}</div>
+            ${got?`<span style="font-size:11px;color:var(--accent);white-space:nowrap;">已收 ${mdShort(got.date||'')}</span>`:(DB_SALARY?`<button class="add-rec-btn" style="padding:4px 10px;font-size:11px;" onclick="openPaid('${x.place}',${p.pay},'${mk}',null,'${esc(tag).replace(/'/g,'&#39;')}')">收到了</button>`:'')}</div>`;
+        }).join('')}</div>`:''}
         ${x.extra.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.extra.map(r=>`＋ ${esc(r.type)}${r.name?'・'+esc(r.name):''} ${money(r.amount||0)}`).join('<br>')}</div>`:''}
-        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
-          <div style="flex:1;font-size:12px;color:${paidR?(diff===0?'var(--accent)':'#c8a84a'):'var(--text3)'};">${paidR?`✅ 已入帳 ${money(paid)}（${mdShort(paidR.date||'')}）${diff?`・差額 ${diff>0?'+':''}${money(diff)}`:''}`:'尚未入帳'}</div>
-          ${DB_SALARY?(paidR?`<button style="${smallBtn('var(--text3)')}" onclick="openPaid('${x.place}',${x.pay},'${mk}','${paidR.id}')">修改</button>`:`<button style="${smallBtn('var(--accent)')}" onclick="openPaid('${x.place}',${x.pay},'${mk}')">已入帳</button>`):''}
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="flex:1;font-size:12px;color:${paidR?(diff>=0?'var(--accent)':'#c8a84a'):'var(--text3)'};">${paidR?`已收 ${money(paid)}／應領 ${money(x.pay)}${diff<0?`・還差 ${money(-diff)}`:diff>0?`・多 ${money(diff)}`:''}`:'未收款'}</div>
+            ${DB_SALARY&&!x.hist&&!(rule.per4)?`<button class="add-rec-btn" style="padding:5px 10px;font-size:12px;" onclick="openPaid('${x.place}',${Math.max(0,x.pay-paid)},'${mk}')">＋ 記錄收款</button>`:''}
+          </div>
+          ${prs.map(r=>`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text3);padding:3px 0;"><div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">💵 ${mdShort(r.date||'')} 收 ${money(r.amount||0)}${r.note?'・'+esc(r.note):''}</div>${DB_SALARY?`<button style="${smallBtn('var(--text3)')}padding:2px 8px;" onclick="openPaid('${x.place}',${x.pay},'${mk}','${r.id}')">改</button>`:''}</div>`).join('')}
         </div></div>`;
     });
     wrap.innerHTML=head+html;
@@ -2712,11 +2724,11 @@ async function renderSalary(silent){
 }
 // ── 入帳 ──
 let paidCtx=null;
-function openPaid(place,due,mk,rowId){
+function openPaid(place,due,mk,rowId,tag){
   const r=rowId?salaryRows.find(x=>x.id===rowId):null;
-  paidCtx={place,mk,rowId};
-  document.getElementById('paid-title').textContent=`💰 ${mk} ${place.replace(' Yamaha','')} 入帳`;
-  document.getElementById('paid-due').textContent=`應領 $${Math.round(due).toLocaleString()}`;
+  paidCtx={place,mk,rowId,tag:tag||null,name:r?r.name:null};
+  document.getElementById('paid-title').textContent=`💵 ${mk} ${place.replace(' Yamaha','')}${tag?'・'+tag.replace(/&#39;/g,"'"):''} 收款`;
+  document.getElementById('paid-due').textContent=r?'修改這筆收款':`這次應收 $${Math.round(due).toLocaleString()}`;
   document.getElementById('paid-amount').value=r?r.amount:Math.round(due);
   document.getElementById('paid-date').value=r?.date||twToday();
   document.getElementById('paid-note').value=r?.note||'';
@@ -2731,16 +2743,16 @@ function salaryProps(o){
 }
 async function savePaid(){
   const c=paidCtx;if(!c)return;
-  const o={name:`${c.mk} ${c.place}`,type:'入帳',amount:document.getElementById('paid-amount').value,date:document.getElementById('paid-date').value,note:document.getElementById('paid-note').value.trim(),place:c.place};
+  const o={name:c.name||`${c.mk} ${c.place}${c.tag?'・'+c.tag.replace(/&#39;/g,"'"):''}`,type:'入帳',amount:document.getElementById('paid-amount').value,date:document.getElementById('paid-date').value,note:document.getElementById('paid-note').value.trim(),place:c.place};
   try{
     if(c.rowId) await notionAPI('PATCH',`/pages/${c.rowId}`,{properties:salaryProps(o)});
     else await notionAPI('POST','/pages',{parent:{database_id:DB_SALARY},properties:salaryProps(o)});
-    closeSheet('sheet-paid');showToast('✅ 已記錄入帳');renderSalary();
+    closeSheet('sheet-paid');showToast('✅ 已記錄收款');renderSalary();
   }catch(e){showToast('❌ '+e.message);}
 }
 function deletePaid(){
   if(!paidCtx?.rowId)return;
-  showConfirm('刪除入帳','確定刪除這筆入帳紀錄？',async()=>{
+  showConfirm('刪除收款','確定刪除這筆收款紀錄？',async()=>{
     try{await notionAPI('PATCH',`/pages/${paidCtx.rowId}`,{archived:true});closeSheet('sheet-paid');showToast('✅ 已刪除');renderSalary();}
     catch(e){showToast('❌ '+e.message);}
   });
@@ -2776,8 +2788,9 @@ async function syncFormReminder(ds){
     const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
     const checks=items.filter(e=>e.extendedProperties?.private?.kind==='checkin'&&e.extendedProperties?.private?.place===FORM_PLACE);
     const rem=items.filter(e=>e.extendedProperties?.private?.kind==='formReminder');
+    const rem2=items.filter(e=>e.extendedProperties?.private?.kind==='formReminder2');
     const done=checks.some(e=>e.extendedProperties?.private?.formDone==='1');
-    if(!checks.length||done||!formOn){for(const r of rem) await ck('DELETE',`/events/${r.id}`);return;}
+    if(!checks.length||done||!formOn){for(const r of [...rem,...rem2]) await ck('DELETE',`/events/${r.id}`);return;}
     const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
     const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
     const summary=`⚠️ 記得填泰順時數（${span}・${formHoursText(hrs)}）`;
@@ -2790,6 +2803,20 @@ async function syncFormReminder(ds){
       if(rem[0].summary!==summary||evParts(rem[0].start.dateTime).hhmm!==formTime) await ck('PATCH',`/events/${rem[0].id}`,{summary,description:body.description,start:body.start,end:body.end});
       for(const r of rem.slice(1)) await ck('DELETE',`/events/${r.id}`);
     }else await ck('POST','/events',body);
+    // 按了「下班」→ 下班後 30 分鐘再提醒一次（太接近晚上那次就不另外提醒）
+    const outs=checks.filter(e=>e.extendedProperties?.private?.checkedOut==='1');
+    let want=null;
+    if(outs.length){
+      const lastEnd=Math.max(...outs.map(e=>new Date(e.end.dateTime).getTime()));
+      const at=lastEnd+30*60000;const night=new Date(twISO(ds,formTime)).getTime();
+      if(at>Date.now()&&at<night-20*60000) want=at;
+    }
+    if(want){
+      const st=isoTW(want);
+      const b2={...body,start:{dateTime:st,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(st,10),timeZone:'Asia/Taipei'},recurrence:undefined,extendedProperties:{private:{kind:'formReminder2',date:ds}}};
+      if(rem2.length){if(rem2[0].start.dateTime!==st||rem2[0].summary!==summary) await ck('PATCH',`/events/${rem2[0].id}`,{summary,start:b2.start,end:b2.end});for(const r of rem2.slice(1)) await ck('DELETE',`/events/${r.id}`);}
+      else await ck('POST','/events',b2);
+    }else{for(const r of rem2) if(new Date(r.start.dateTime).getTime()>Date.now()) await ck('DELETE',`/events/${r.id}`);}
   }catch(e){console.warn('formReminder',e.message);}
 }
 function formCardHtml(){
@@ -3040,15 +3067,16 @@ const HELP=[
   ['自動打卡','那間教室今天有課、你人在附近時打開網站，就會自動打卡。泰順沒有排課，所以要按打卡按鈕。'],
   ['補打卡','有課卻沒打卡超過 10 分鐘，首頁會出現紅色提醒，按「補打卡」以第一堂課時間補登。'],
   ['下班','預設是最後一堂課結束時間；在錄音室等地方按「下班」記錄當下時間。點打卡那一行可以修改。'],
-  ['泰順時數','有在泰順打卡的日子，晚上會提醒填公司時數（含 2 小時通勤），填完在首頁按「完成」。'],
+  ['泰順時數','有在泰順打卡的日子會提醒填公司時數（含 2 小時通勤）：按「下班」後 30 分鐘一次，晚上 23:30 再一次。填完在首頁按「完成」，兩個提醒都會取消。'],
  ]},
  {t:'💰 薪資',items:[
   ['應領怎麼算','時薪 × 實際上課時數；學生有特別時薪就用特別價；請假、老師停課不算；代課和體驗課照教室時薪。當月只算已上完的課。'],
   ['藝文滿四堂','每位學生各自滿四堂發一次，同步日曆前已上的堂數填在學生的「藝文起始進度」。'],
-  ['入帳','收到錢時在那間教室按「已入帳」，填實收金額和日期，有差額會標出來。'],
+  ['記錄收款','每收到一筆錢，就在那間教室按「＋ 記錄收款」，填金額和收到的日期。一個月可以記很多次，卡片會顯示「已收／應領」和每一筆。'],
+  ['藝文收款','藝文每一筆「滿四堂」旁邊有「收到了」，按下去記錄那一筆，看得出哪幾位的錢還沒拿到。'],
   ['額外收入','「＋ 獎金／錄音案子／其他」記錄錄音室案子、紅包、獎金。'],
   ['歷年表格','薪資頁上方切到「歷年表格」，每月每間教室一目了然。'],
-  ['調薪','設定 → 計薪規則 →「在 Notion 修改」。調薪時新增一列並填生效日，不要改舊的那列。'],
+  ['調薪','設定 → 薪資 → 計薪規則 →「在 Notion 修改」。調薪時新增一列並填生效日，不要改舊的那列。'],
  ]},
  {t:'🔔 提醒',items:[
   ['填寫上課紀錄','每天固定時間由 Google 日曆通知；當天的課都寫完了就不會通知。時間在設定頁調整。'],
@@ -3229,15 +3257,14 @@ function renderSettings(){
   let h='';
   h+=setGroup('紀錄',
     setRow('🕘','打卡紀錄',setStats.ck||'每月打卡與工時',"showPage('checkins')")+
-    setRow('💰','薪資紀錄',setStats.sal!=null?`${mNum} 月應領 ${money(setStats.sal)}`:'每月應領、入帳、歷年表格',"showPage('salary')")+
     setRow('🏖','請假紀錄','我的請假・學生請假',"showPage('leaves')")+
     setRow('🔁','代課紀錄',setStats.sub!=null?`本月 ${setStats.sub} 堂`:'代課與代課紀錄',"showPage('subs')")+
     setRow('📝','待寫紀錄','昨天、今天的上課紀錄',"showPage('todo')")+
     setRow('📍','教室','四間教室的學生與上課日',"showPage('rooms')")+
-    setRow('💵','計薪規則',placeRules&&placeRules.length?`${rulePlaces().length} 個地點・時薪與發薪日`:'各教室時薪、發薪日、調薪紀錄',"showPage('rules')")+
     setRow('📋','版本紀錄',`目前 ${APP_VERSION}`,"showPage('changelog')"));
-  h+=setGroup('說明',
-    setRow('📖','操作教學','每個功能怎麼用，可搜尋',"showPage('help')"));
+  h+=setGroup('薪資',
+    setRow('💰','薪資紀錄',setStats.sal!=null?`${mNum} 月應領 ${money(setStats.sal)}`:'每月應領、收款、歷年表格',"showPage('salary')")+
+    setRow('💵','計薪規則',placeRules&&placeRules.length?`${rulePlaces().length} 個地點・時薪與發薪日`:'各教室時薪、發薪日、調薪紀錄',"showPage('rules')"));
   h+=setGroup('提醒',
     setRow('📝','填寫上課紀錄・每日提醒',remOn?`每天 ${remT}・當天都寫完就不通知`:'已關閉',null,
       `<div style="display:flex;gap:6px;align-items:center;">${timeInput('reminder-time',remT,"if(reminderEv)setReminder(this.value)")}<button onclick="toggleReminder()" style="${smallBtn(remOn?'var(--accent)':'var(--text3)')}">${remOn?'開':'關'}</button></div>`)+
@@ -3251,6 +3278,8 @@ function renderSettings(){
     setRow('📤','打卡同步到 Notion','把本月打卡補進 Notion',null,`<button style="${smallBtn('var(--text2)')}" onclick="settingsSyncChecks()">${ckSyncText||'同步本月'}</button>`)+
     setRow('📤','課程異動同步到 Notion','請假、停課、調課、補課、代課',null,`<button id="ch-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncChangesToNotion()">${chSyncText||'全部同步'}</button>`)+
     setRow('🔑','更換 Notion 權杖','權杖重新產生後使用','changeToken()'));
+  h+=setGroup('說明',
+    setRow('📖','操作教學','每個功能怎麼用，可搜尋',"showPage('help')"));
   h+=`<div style="text-align:center;font-size:11px;color:var(--text3);margin:24px 0 8px;">阿森Asen｜工作&爵士鼓教學系統<br><span style="cursor:pointer;text-decoration:underline dotted;" onclick="showPage('changelog')">版本 ${APP_VERSION}・更新日誌</span></div>`;
   wrap.innerHTML=h;
   loadSettingStats();
