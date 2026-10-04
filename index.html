@@ -268,6 +268,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     <div class="page" id="page-settings">
       <div style="padding:4px 16px 24px;" id="settings-wrap"></div>
     </div>
+    <div class="page" id="page-rules">
+      <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
+      <div style="padding:0 16px 24px;" id="rules-wrap"></div>
+    </div>
     <div class="page" id="page-changelog">
       <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
       <div style="padding:0 16px 24px;" id="changelog-wrap"></div>
@@ -421,7 +425,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         <select class="form-select" id="stu-booking"><option>每週固定</option><option>約課制</option></select>
       </div>
       <div class="form-group"><label class="form-label">狀態</label>
-        <select class="form-select" id="stu-status"><option>正常上課</option><option>暫停上課</option><option>不上課</option></select>
+        <select class="form-select" id="stu-status"><option>正常上課</option><option>體驗</option><option>暫停上課</option><option>不上課</option></select>
       </div>
       <div class="form-group"><label class="form-label">備註</label><textarea class="form-textarea" id="stu-note" placeholder="習慣、注意事項…"></textarea></div>
     </div>
@@ -925,8 +929,10 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.04-2';
+const APP_VERSION='2026.10.04-4';
 const CHANGELOG=[
+  {v:'2026.10.04-4',items:['學生新增「體驗」狀態：用加課排體驗課、照教室時薪計薪、學生頁可一鍵轉為正式學生','學生列表多一個「體驗」篩選，課表和今日課程以 🌱 標示','修正：老師請假期間，新學生或改時間學生的課不會自動停課；現在會自動補標，請假紀錄頁也有「重新套用」']},
+  {v:'2026.10.04-3',items:['課表切換週變快：會先載入前後週，滑過去立刻顯示','課表日期列標示國定假日（紅色）和補班日（藍色）','設定頁的計薪規則收成一列，點進去看各教室規則和調薪紀錄','設定頁「紀錄」區新增「版本紀錄」']},
   {v:'2026.10.04-2',items:['學生請假可以填理由：快速選項（生病、出遊…）或自己輸入，也可以留空','指令框也能帶理由，例如「小明 10/31 請假 生病」','請假理由會顯示在課程異動、請假紀錄、匯出課表，並同步到 Notion','新增更新日誌，每次更新後首頁會提示新功能']},
   {v:'2026.10.04-1',items:['切換頁面時從頂端開始（修正設定頁一打開就在最下面）','首頁底部也顯示版本號','課表上方的週切換列固定在畫面上方','進入課表會自動捲到現在時間的紅線']},
   {v:'2026.10.03',items:['Google 日曆長期登入，不用再每小時重新連接','Cloudflare Worker 安全加固，只接受從網站來的請求','計薪規則改由 Notion「教室設定」管理，支援調薪生效日','學生資料新增生日、家長 LINE、開始上課日、藝文起始進度','批次匯入上課紀錄','App 圖示改成青蛙爵士鼓，名稱「阿森\'s Web」']},
@@ -974,7 +980,7 @@ function gcalInit(){
         gLegacy=true;showToast('⚠️ 長期登入暫時無法使用，請再按一次「連接」');console.warn(e);
         return;
       }
-      weekKey=null;todayKey=null;onGcalChange();
+      weekKey=null;weekCache={};todayKey=null;onGcalChange();
     }
   });
   gTokenClient=google.accounts.oauth2.initTokenClient({
@@ -984,7 +990,7 @@ function gcalInit(){
       gToken=resp.access_token;gExp=Date.now()+(resp.expires_in||3600)*1000;
       try{localStorage.setItem('gcal_token',JSON.stringify({t:gToken,e:gExp}));}catch(e){}
       showToast('✅ 已連接 Google 日曆');
-      weekKey=null;todayKey=null;onGcalChange();
+      weekKey=null;weekCache={};todayKey=null;onGcalChange();
     }
   });
 }
@@ -1032,7 +1038,9 @@ function mondayOf(off){const n=twNow();return addDays(ymd(n),-((n.getUTCDay()+6)
 function nextDateFor(day){const idx=DAYS.indexOf(day);if(idx<0)return twToday();const ti=(twNow().getUTCDay()+6)%7;return addDays(twToday(),(idx-ti+7)%7);}
 function fmtMD(ds){const d=new Date(ds+'T00:00:00Z');return `${d.getUTCMonth()+1}/${d.getUTCDate()} ${DAYS[(d.getUTCDay()+6)%7]}`;}
 function untilYesterday(){return new Date(new Date(twISO(twToday(),'00:00')).getTime()-1000).toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';}
-function isBooking(s){return s.booking==='約課制';}
+function isBooking(s){return s.booking==='約課制'||s.status==='體驗';}
+function isTrial(s){return s&&s.status==='體驗';}
+function bookWord(s){return isTrial(s)?'體驗課':isBooking(s)?'約課':'補課';}
 function wantsWeekly(s){return !isBooking(s)&&s.status==='正常上課'&&DAYS.includes(s.day)&&!!s.time;}
 
 function evBody(s,ds,hhmm,dur,kind){
@@ -1092,6 +1100,7 @@ async function syncStudent(s){
       if(!/already exists|409|duplicate/i.test(e.message)) throw e;
       await gcal('PUT',`/events/${b.id}`,{...b,status:'confirmed'}); // 已存在（或曾被刪除）→ 覆寫恢復
     }
+    if(!syncBusy) await reapplyAllLeaves();
   }
   // 改名時同步未來約課的名稱
   const books=await listByStudent(s.id,'booking',[['timeMin',new Date().toISOString()]]);
@@ -1115,26 +1124,45 @@ async function syncAll(){
     if(btn) btn.textContent=`同步中… ${i+1}/${students.length}`;
     try{await syncStudent(students[i]);ok++;}catch(e){fail++;console.error('sync',students[i].name,e);}
   }
-  syncBusy=false;weekKey=null;todayKey=null;
+  syncBusy=false;await reapplyAllLeaves();weekKey=null;weekCache={};todayKey=null;
   showToast(fail?`⚠️ 完成 ${ok} 位，${fail} 位失敗`:`✅ 已同步 ${ok} 位學生到日曆`);
   await loadWeek();renderHome();
 }
 
 // ── 課表週資料 ──
 let weekOffset=0,weekEvents=null,weekKey=null,weekLoading=false;
+// ── 週資料快取＋預先載入前後週（切換週時立刻顯示）──
+const HOLIDAY_CAL='zh-tw.taiwan#holiday@group.v.calendar.google.com';
+let weekCache={},weekHolidays=[],weekFetching={};
+async function fetchWeek(mon){
+  if(weekFetching[mon]) return weekFetching[mon];
+  weekFetching[mon]=(async()=>{
+    try{
+      const q=[['timeMin',twISO(mon,'00:00')],['timeMax',twISO(addDays(mon,7),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']];
+      const [d,hd]=await Promise.all([gcal('GET','/events',null,q),gcal('GET','/events',null,q,HOLIDAY_CAL).catch(()=>null)]);
+      const all=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+      weekCache[mon]={at:Date.now(),
+        events:all.filter(e=>e.start&&e.start.dateTime&&e.extendedProperties?.private?.kind!=='reminder'),
+        leaves:all.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start&&e.start.date),
+        holidays:(hd&&hd.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.date).map(e=>({date:e.start.date,end:e.end?.date,name:e.summary||'',desc:e.description||''}))};
+      return weekCache[mon];
+    }finally{delete weekFetching[mon];}
+  })();
+  return weekFetching[mon];
+}
+function applyWeek(mon){const c=weekCache[mon];weekEvents=c.events;weekLeaves=c.leaves;weekHolidays=c.holidays;weekKey=mon;}
+function prefetchAround(mon){[addDays(mon,7),addDays(mon,-7)].forEach(m=>{if(!weekCache[m]||Date.now()-weekCache[m].at>5*60000)fetchWeek(m).catch(()=>{});});}
 async function loadWeek(){
   const mon=mondayOf(weekOffset);
-  if(!gcalValid()){weekEvents=null;weekKey=null;todayKey=null;return;}
-  if(weekKey===mon&&weekEvents) return;
+  if(!gcalValid()){weekEvents=null;weekKey=null;weekCache={};todayKey=null;return;}
+  if(weekKey===mon&&weekEvents){prefetchAround(mon);return;}
+  const c=weekCache[mon];
+  if(c&&Date.now()-c.at<5*60000){applyWeek(mon);prefetchAround(mon);return;}
   weekLoading=true;
-  try{
-    const d=await gcal('GET','/events',null,[['timeMin',twISO(mon,'00:00')],['timeMax',twISO(addDays(mon,7),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]);
-    const all=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
-    weekEvents=all.filter(e=>e.start&&e.start.dateTime&&e.extendedProperties?.private?.kind!=='reminder');
-    weekLeaves=all.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start&&e.start.date);
-    weekKey=mon;
-  }catch(e){weekEvents=null;weekKey=null;todayKey=null;showToast('❌ '+e.message);}
+  try{await fetchWeek(mon);if(mondayOf(weekOffset)===mon||weekKey===null)applyWeek(mon);else applyWeek(mon);}
+  catch(e){weekEvents=null;weekKey=null;weekCache={};todayKey=null;showToast('❌ '+e.message);}
   weekLoading=false;
+  prefetchAround(mon);
 }
 // 現在時間紅線（只在本週、今天那一欄）
 function nowLineHtml(){
@@ -1308,7 +1336,7 @@ function cancelLesson(evId){
   showConfirm(t,`${evName(ev)} ${fmtMD(p.date)} ${p.hhmm}${isB?' 的課將從日曆移除。':' 將標記為請假，會留下紀錄，之後可恢復。'}`,async()=>{
     try{
       if(isB){await gcal('DELETE',`/events/${evId}`);chDelete(`${evId}|補課`);} else await markEvent(ev,'leave');
-      weekKey=null;todayKey=null;showToast(isB?`✅ 已${t}`:'✅ 已登記請假');loadUpcoming(curStudent);
+      weekKey=null;weekCache={};todayKey=null;showToast(isB?`✅ 已${t}`:'✅ 已登記請假');loadUpcoming(curStudent);
     }catch(e){showToast('❌ '+e.message);}
   },isB?t:'確定請假');
 }
@@ -1325,14 +1353,14 @@ async function saveLeaveReason(){
   const ev=lrEv;if(!ev)return;
   const reason=document.getElementById('lr-text').value.trim();
   const btn=document.getElementById('lr-btn');btn.disabled=true;btn.textContent='處理中…';
-  try{await markEvent(ev,'leave',reason);closeSheet('sheet-lreason');weekKey=null;todayKey=null;showToast('✅ 已登記請假'+(reason?'・'+reason:''));loadUpcoming(curStudent);}
+  try{await markEvent(ev,'leave',reason);closeSheet('sheet-lreason');weekKey=null;weekCache={};todayKey=null;showToast('✅ 已登記請假'+(reason?'・'+reason:''));loadUpcoming(curStudent);}
   catch(e){showToast('❌ '+e.message);}
   btn.disabled=false;btn.textContent='確定請假';
 }
 function restoreLeave(evId){
   const ev=evCache[evId];if(!ev)return;
   showConfirm('恢復上課',`${evName(ev)} ${fmtMD(evParts(ev.start.dateTime).date)} 的請假將撤銷，恢復成正常上課。`,async()=>{
-    try{await markEvent(ev,'');weekKey=null;todayKey=null;showToast('✅ 已恢復上課');
+    try{await markEvent(ev,'');weekKey=null;weekCache={};todayKey=null;showToast('✅ 已恢復上課');
       if(curPage==='detail') loadUpcoming(curStudent);
       if(curPage==='leaves') renderLeaves();
     }catch(e){showToast('❌ '+e.message);}
@@ -1361,6 +1389,7 @@ async function renderLeaves(){
       const yrDays=items.reduce((n,e)=>n+leaveDays(e).filter(x=>x.startsWith(yr)).length,0);
       html+=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
         <div style="flex:1;font-size:13px;color:var(--text2);">${yr} 年共請假 <b style="color:var(--text);">${yrDays}</b> 天</div>
+        <button style="${smallBtn('var(--text2)')}" onclick="reapplyButton()">重新套用</button>
         <button class="add-rec-btn" onclick="openLeave()">＋ 請假</button></div>`;
       html+=groupByMonth(items,e=>e.start.date,e=>{
         const days=leaveDays(e);const pr=e.extendedProperties?.private||{};
@@ -1516,7 +1545,7 @@ function openBooking(sid){
   bookingStudentId=sid;rescheduleEvId=null;
   document.getElementById('book-student-row').style.display='none';
   document.getElementById('save-book-btn').textContent='✅ 建立';
-  document.getElementById('book-title').textContent=`📅 ${s.name}｜${isBooking(s)?'新增約課':'新增補課'}`;
+  document.getElementById('book-title').textContent=`📅 ${s.name}｜新增${bookWord(s)}`;
   document.getElementById('book-date').value=nextDateFor(s.day);
   document.getElementById('book-time').value=s.time?pad5(s.time):'19:00';
   document.getElementById('book-duration').value=String(parseInt(s.duration||'60')||60);
@@ -1540,7 +1569,7 @@ async function saveBooking(){
       const upd=await gcal('PATCH',`/events/${ev.id}`,{start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'},extendedProperties:{private:pr}});
       if(wasOff&&upd) await markEvent(upd,''); // 老師停課的課改期後恢復成正常上課
       if(upd) chLesson(upd,'調課');
-      weekKey=null;todayKey=null;rescheduleEvId=null;closeSheet('sheet-booking');
+      weekKey=null;weekCache={};todayKey=null;rescheduleEvId=null;closeSheet('sheet-booking');
       showToast(`✅ 已調到 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);
       btn.disabled=false;btn.textContent='✅ 建立';return;
     }
@@ -1548,7 +1577,7 @@ async function saveBooking(){
     if(!isBooking(s)){body.extendedProperties.private.makeup='1';body.description='補課（爵士鼓教學系統）';}
     const made=await gcal('POST','/events',body);
     if(made&&!isBooking(s)) chLesson(made,'補課');
-    weekKey=null;todayKey=null;closeSheet('sheet-booking');showToast(`✅ 已約 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);if(curPage==='schedule')renderSchedule();
+    weekKey=null;weekCache={};todayKey=null;closeSheet('sheet-booking');showToast(`✅ 已約 ${fmtMD(ds)} ${tm}`);loadUpcoming(s.id);if(curPage==='schedule')renderSchedule();
   }catch(e){showToast('❌ '+e.message);}
   btn.disabled=false;btn.textContent=rescheduleEvId?'✅ 確定調課':'✅ 建立';
 }
@@ -1624,7 +1653,7 @@ async function saveLeave(){
       showToast(fail?`⚠️ 已請假，但有 ${fail} 堂課取消失敗`:`✅ 已請假，取消 ${ids.length} 堂課`);
     }catch(e){showToast('❌ 建立請假失敗：'+e.message);}
     btn.disabled=false;btn.textContent='✅ 確定請假';
-    weekKey=null;todayKey=null;loadLeaves();
+    weekKey=null;weekCache={};todayKey=null;loadLeaves();
     if(curPage==='schedule') renderSchedule();
     if(curPage==='leaves') renderLeaves();
     if(curPage==='home'){await Promise.all([loadWeek(),loadToday()]);renderHome();}
@@ -1643,7 +1672,7 @@ function cancelLeave(evId){
       }catch(e){fail++;}}
       await gcal('DELETE',`/events/${evId}`);chDelete(`${evId}|老師請假`);
       showToast(fail?`⚠️ 已取消請假，${fail} 堂課無法恢復`:`✅ 已取消請假，恢復 ${ids.length} 堂課`);
-      weekKey=null;todayKey=null;loadLeaves();
+      weekKey=null;weekCache={};todayKey=null;loadLeaves();
       if(curPage==='schedule') renderSchedule();
       if(curPage==='leaves') renderLeaves();
     }catch(e){showToast('❌ '+e.message);}
@@ -1886,7 +1915,7 @@ async function confirmCommand(){
       const made=await gcal('POST','/events',body);
       if(made&&!isBooking(s)) chLesson(made,'補課');
     }
-    cmdPending=null;weekKey=null;todayKey=null;
+    cmdPending=null;weekKey=null;weekCache={};todayKey=null;
     document.getElementById('cmd-input').value='';
     out.innerHTML=cmdMsg('✅ 完成');setTimeout(()=>{if(!cmdPending&&out)out.innerHTML='';},2500);
     showToast('✅ 已更新日曆');
@@ -2068,7 +2097,7 @@ async function saveSubNew(){
       extendedProperties:{private:{kind:'sub',subStudent:stu.slice(0,100),subTeacher:teacher.slice(0,100),room:room.slice(0,100)}},
     });
     if(subMade) chLesson(subMade,'代課');
-    weekKey=null;todayKey=null;closeSheet('sheet-sub-new');showToast(`✅ 已建立代課 ${fmtMD(ds)} ${tm}`);
+    weekKey=null;weekCache={};todayKey=null;closeSheet('sheet-sub-new');showToast(`✅ 已建立代課 ${fmtMD(ds)} ${tm}`);
     await loadToday();if(curPage==='home')renderHome();if(curPage==='schedule')renderSchedule();
   }catch(e){showToast('❌ '+e.message);}
   btn.disabled=false;btn.textContent='✅ 建立';
@@ -2111,7 +2140,7 @@ function copySubRecord(){
 function deleteSub(){
   if(!subEv)return;
   showConfirm('刪除代課','這堂代課（和代課紀錄）會從日曆刪除。',async()=>{
-    try{await gcal('DELETE',`/events/${subEv.id}`);chDelete(`${subEv.id}|代課`);closeSheet('sheet-sub-rec');weekKey=null;todayKey=null;showToast('✅ 已刪除');
+    try{await gcal('DELETE',`/events/${subEv.id}`);chDelete(`${subEv.id}|代課`);closeSheet('sheet-sub-rec');weekKey=null;weekCache={};todayKey=null;showToast('✅ 已刪除');
       await loadToday();if(curPage==='home')renderHome();if(curPage==='schedule')renderSchedule();if(curPage==='todo')renderTodo();}
     catch(e){showToast('❌ '+e.message);}
   });
@@ -2177,7 +2206,7 @@ function unrecHtml(){
       <div onclick="${st?'':`toggleToday('${e.id}')`}" style="display:flex;gap:10px;padding:9px 0;align-items:flex-start;${st?'opacity:0.5;':'cursor:pointer;'}">
         <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${p.hhmm}</div>
         <div style="flex:1;min-width:0;">
-          <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${esc(name)}</div><div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">・${sub2}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
+          <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${!sub&&isTrial(students.find(x=>x.id===sid))?'🌱 ':''}${esc(name)}</div><div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">・${sub2}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
         </div>
       </div>${detail}</div>`;
   }).join('')+`</div>`;
@@ -2918,6 +2947,24 @@ function updateBannerHtml(){
       <div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.items[0])}・查看全部 ›</div></div>
     <button onclick="markSeen()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:0 4px;">✕</button></div>`;
 }
+function renderRules(){
+  const wrap=document.getElementById('rules-wrap');
+  if(!placeRules){wrap.innerHTML=`<div class="rec-empty">讀取中…</div>`;loadPlaceRules().then(()=>{if(curPage==='rules')renderRules();});return;}
+  const td=twToday();
+  let h=rulePlaces().map(p=>{
+    const cur=ruleFor(p);
+    const hist=(placeRules||[]).filter(r=>r.place===p).sort((a,b)=>a.from<b.from?1:-1);
+    const desc=r=>r.manual||r.method==='手動'?'手動記錄':`時薪 ${r.rate}・${r.per4||r.method==='滿四堂'?'滿四堂發':r.payDay?'次月 '+r.payDay+' 號發':''}`;
+    return`<div class="rec-card" style="padding:12px 14px;margin-bottom:10px;">
+      <div style="font-size:15px;font-weight:800;color:var(--text);">${p.replace(' Yamaha','')}</div>
+      <div style="font-size:13px;color:var(--accent);margin-top:2px;">${cur?desc(cur):'—'}</div>
+      ${hist.length>1||(hist[0]&&hist[0].note)?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;">${hist.map(r=>`<div style="font-size:12px;color:${r.from>td?'#c8a84a':'var(--text3)'};line-height:1.7;">${r.from>td?'⏳ ':''}${r.from==='2000-01-01'?'最初':r.from.replace(/-/g,'/')} 起・${desc(r)}${r.note?'・'+esc(r.note):''}</div>`).join('')}</div>`:''}
+    </div>`;
+  }).join('')||`<div class="rec-empty">還沒有計薪規則</div>`;
+  h+=`<div style="font-size:12px;color:var(--text3);line-height:1.7;margin:6px 4px 12px;">調薪時請在 Notion「教室設定」<b>新增一列</b>並填生效日，不要改舊的那列，舊月份的薪資才會維持正確。</div>
+    <button class="add-rec-btn" onclick="window.open('https://www.notion.so/${DB_PLACES}','_blank')">✏️ 在 Notion 修改</button>`;
+  wrap.innerHTML=h;
+}
 function renderChangelog(){
   markSeen();
   document.getElementById('changelog-wrap').innerHTML=CHANGELOG.map((c,i)=>`<div class="rec-card" style="padding:12px 14px;margin-bottom:10px;">
@@ -2999,7 +3046,7 @@ function openAddLesson(){
 function pickBookStudent(sid){
   bookingStudentId=sid||null;
   const s=students.find(x=>x.id===sid);if(!s)return;
-  document.getElementById('book-title').textContent=`＋ ${s.name}｜${isBooking(s)?'約課':'補課'}`;
+  document.getElementById('book-title').textContent=`＋ ${s.name}｜${bookWord(s)}`;
   if(s.time) document.getElementById('book-time').value=pad5(s.time);
   document.getElementById('book-duration').value=String(parseInt(s.duration||'60')||60);
 }
@@ -3071,10 +3118,9 @@ function renderSettings(){
     setRow('🏖','請假紀錄','我的請假・學生請假',"showPage('leaves')")+
     setRow('🔁','代課紀錄',setStats.sub!=null?`本月 ${setStats.sub} 堂`:'代課與代課紀錄',"showPage('subs')")+
     setRow('📝','待寫紀錄','昨天、今天的上課紀錄',"showPage('todo')")+
-    setRow('📍','教室','四間教室的學生與上課日',"showPage('rooms')"));
-  h+=setGroup('薪資規則',
-    (placeRules&&placeRules.length?rulePlaces().map(p=>{const r=ruleFor(p);return setRow('🏫',p.replace(' Yamaha',''),r?(r.manual?'手動記錄':`時薪 ${r.rate}・${r.per4?'滿四堂發':r.payDay?'次月 '+r.payDay+' 號發':''}`):'',null,'');}).join(''):setRow('🏫','教室設定','讀取中…',null,''))+
-    setRow('✏️','在 Notion 修改','調薪請新增一列並填生效日',"window.open('https://www.notion.so/${DB_PLACES}','_blank')"));
+    setRow('📍','教室','四間教室的學生與上課日',"showPage('rooms')")+
+    setRow('💵','計薪規則',placeRules&&placeRules.length?`${rulePlaces().length} 個地點・時薪與發薪日`:'各教室時薪、發薪日、調薪紀錄',"showPage('rules')")+
+    setRow('📋','版本紀錄',`目前 ${APP_VERSION}`,"showPage('changelog')"));
   h+=setGroup('提醒',
     setRow('📝','填寫上課紀錄・每日提醒',remOn?`每天 ${remT}・當天都寫完就不通知`:'已關閉',null,
       `<div style="display:flex;gap:6px;align-items:center;">${timeInput('reminder-time',remT,"if(reminderEv)setReminder(this.value)")}<button onclick="toggleReminder()" style="${smallBtn(remOn?'var(--accent)':'var(--text3)')}">${remOn?'開':'關'}</button></div>`)+
@@ -3175,6 +3221,43 @@ async function runImport(){
   showToast(ok===todo.length?`✅ 已匯入 ${ok} 堂紀錄`:`⚠️ 匯入 ${ok}／${todo.length} 堂`);
 }
 
+// ── 老師請假：把請假期間「後來才出現」的課（新學生、改時間）也標成停課 ──
+async function reapplyLeave(lev){
+  const days=leaveDays(lev);if(!days.length) return 0;
+  const end=addDays(days[days.length-1],1);
+  const from=days[0]>twToday()?days[0]:twToday();
+  if(from>=end) return 0;
+  const d=await gcal('GET','/events',null,[['timeMin',twISO(from,'00:00')],['timeMax',twISO(end,'00:00')],['singleEvents','true'],['maxResults','250']]);
+  const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&e.extendedProperties?.private?.studentId&&!evState(e));
+  if(!items.length) return 0;
+  const added=[];
+  for(const e of items){try{await markEvent(e,'teacherOff');added.push(e.id);}catch(err){console.warn(err);}}
+  if(!added.length) return 0;
+  // 加進請假紀錄的清單，取消請假時才能一起恢復
+  const pr={...(lev.extendedProperties?.private||{})};
+  let ci=0;while(pr['r'+ci]) ci++;
+  let last=ci>0?pr['r'+(ci-1)]:'';let idx=ci>0?ci-1:0;
+  added.forEach(id=>{const next=last?last+','+id:id;if(next.length>1000){idx++;last=id;}else last=next;pr['r'+idx]=last;});
+  pr.count=String(parseInt(pr.count||'0')+added.length);
+  const upd=await gcal('PATCH',`/events/${lev.id}`,{extendedProperties:{private:pr}});
+  if(upd) chTeacherLeave(upd);
+  return added.length;
+}
+async function reapplyAllLeaves(){
+  try{
+    const d=await gcal('GET','/events',null,[['privateExtendedProperty','kind=teacherLeave'],['timeMin',twISO(twToday(),'00:00')],['singleEvents','true'],['maxResults','50']]);
+    let n=0;for(const lev of (d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.date)) n+=await reapplyLeave(lev);
+    if(n){weekKey=null;weekCache={};todayKey=null;}
+    return n;
+  }catch(e){console.warn('reapplyAllLeaves',e.message);return 0;}
+}
+async function reapplyButton(){
+  showToast('檢查請假期間的課…');
+  const n=await reapplyAllLeaves();
+  showToast(n?`✅ 已把 ${n} 堂課標成老師停課`:'請假期間沒有需要處理的課');
+  if(curPage==='leaves') renderLeaves();
+}
+
 function gcalPanelHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
   const b='border:none;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;';
@@ -3199,8 +3282,8 @@ function cycleStars(id){const t=totalStars(id);const c=t%3;return t>0&&c===0?3:c
 function starsUI(n){return'⭐'.repeat(n)+'☆'.repeat(3-n);}
 function todayStr(){return twToday();}
 function nowTime(){const n=new Date();return`${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;}
-function statusTag(s){return{正常上課:'tag-active',暫停上課:'tag-pause',不上課:'tag-stop'}[s]||'tag-active';}
-function statusDot(s){return{正常上課:'#4a9060',暫停上課:'#c8a84a',不上課:'#c46a6a'}[s]||'#4a9060';}
+function statusTag(s){return{正常上課:'tag-active',體驗:'tag-pause',暫停上課:'tag-pause',不上課:'tag-stop'}[s]||'tag-active';}
+function statusDot(s){return{正常上課:'#4a9060',體驗:'#5aa9e6',暫停上課:'#c8a84a',不上課:'#c46a6a'}[s]||'#4a9060';}
 function isInactive(s){return s.status==='不上課';}
 // 統一時間格式：1500 → 15:00，19:00 → 19:00
 function normalizeTime(t){
@@ -3250,7 +3333,7 @@ async function refreshAll(){
   if(refreshing||!NOTION_TOKEN) return;
   refreshing=true;showToast('🔄 更新中…');
   try{
-    weekKey=null;todayKey=null;
+    weekKey=null;weekCache={};todayKey=null;
     await Promise.all([loadStudents(),loadRecords()]);
     if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);autoCheckin(true);}
     if(curPage==='home') renderHome();
@@ -3268,7 +3351,7 @@ function showPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
-  const titles={changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
+  const titles={rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
@@ -3284,6 +3367,7 @@ function showPage(id){
   if(id==='settings') renderSettings();
   if(id==='subs') renderSubs();
   if(id==='changelog') renderChangelog();
+  if(id==='rules') renderRules();
   if(id==='rooms') renderHome();
   if(id==='schedule'){renderSchedule();if(!navFromPop){window.scrollTo(0,0);scheduleScrollPending=true;requestAnimationFrame(()=>requestAnimationFrame(scrollScheduleToNow));}}
   if(id==='students'){renderStudents();if(!navFromPop)requestAnimationFrame(()=>requestAnimationFrame(scrollStudentsToToday));else updateStickyVars();}
@@ -3336,7 +3420,11 @@ function renderSchedule(){
   const mon=mondayOf(weekOffset);
   const today=twToday();
   const useCal=gcalValid();
-  if(useCal&&weekKey!==mon&&!weekLoading){loadWeek().then(()=>{if(curPage==='schedule')renderSchedule();});}
+  if(useCal&&weekKey!==mon){
+    const c=weekCache[mon];
+    if(c&&Date.now()-c.at<5*60000){applyWeek(mon);prefetchAround(mon);}
+    else loadWeek().then(()=>{if(curPage==='schedule'&&mondayOf(weekOffset)===mon)renderSchedule();});
+  }
   const calReady=useCal&&weekEvents&&weekKey===mon;
   const DAY_SHORT=['一','二','三','四','五','六','日'];
   const weekDates=DAYS.map((_,i)=>addDays(mon,i));
@@ -3359,9 +3447,17 @@ function renderSchedule(){
     ${DAYS.map((d,i)=>{
       const isT=weekDates[i]===today;
       const dt={getDate:()=>parseInt(weekDates[i].slice(8))};
-      return`<div style="text-align:center;padding:6px 2px;border-left:1px solid var(--border);">
-        <div style="font-size:10px;color:${isT?'var(--accent)':'var(--text3)'};font-weight:700;">${DAY_SHORT[i]}</div>
-        <div style="font-size:15px;font-weight:900;color:${isT?'var(--accent)':'var(--text)'};width:26px;height:26px;border-radius:50%;${isT?'background:rgba(93,184,122,0.15);':''}display:flex;align-items:center;justify-content:center;margin:2px auto 0;">${dt.getDate()}</div>
+      const hol=(calReady?weekHolidays:[]).filter(h=>weekDates[i]>=h.date&&weekDates[i]<(h.end||addDays(h.date,1)));
+      const work=hol.find(h=>/補行上班|補班/.test(h.name));
+      const OFF_RE=/元旦|春節|除夕|和平紀念日|兒童節|民族掃墓節|清明|勞動節|端午|中秋|國慶|光復|行憲紀念日|教師節|補假|放假|連假|調整放假/;
+      const off=hol.find(h=>!/補行上班|補班/.test(h.name)&&(/假期|Public holiday|國定假日/.test(h.desc)||OFF_RE.test(h.name)));
+      const hname=(off||work||hol[0]||{}).name||'';
+      const bg=off?'rgba(229,72,77,0.16)':work?'rgba(90,169,230,0.14)':'';
+      const col=off?'#ff7b7f':work?'#7fbef0':(isT?'var(--accent)':'var(--text)');
+      return`<div style="text-align:center;padding:6px 2px 4px;border-left:1px solid var(--border);${bg?'background:'+bg+';':''}" title="${esc(hname)}">
+        <div style="font-size:10px;color:${off?'#ff7b7f':isT?'var(--accent)':'var(--text3)'};font-weight:700;">${DAY_SHORT[i]}</div>
+        <div style="font-size:15px;font-weight:900;color:${col};width:26px;height:26px;border-radius:50%;${isT?'background:rgba(93,184,122,0.15);':''}display:flex;align-items:center;justify-content:center;margin:2px auto 0;">${dt.getDate()}</div>
+        <div style="font-size:8px;line-height:1.2;height:10px;color:${off?'#ff9a9d':work?'#9ccff5':'var(--text3)'};white-space:nowrap;overflow:hidden;text-overflow:clip;">${hname?esc(work&&!off?'補班':hname.replace(/[（(].*$/,'').slice(0,4)):''}</div>
       </div>`;
     }).join('')}
   </div>`;
@@ -3460,7 +3556,7 @@ function renderSchedule(){
       box-sizing:border-box;
       ${layered?'box-shadow:-3px 0 6px rgba(0,0,0,0.45);':''}
     ">
-      <div style="font-size:11px;font-weight:700;color:${state?'var(--text3)':layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${state?'text-decoration:line-through;':''}">${state==='leave'?'🚫':state==='teacherOff'?'⛔':''}${s.name}</div>
+      <div style="font-size:11px;font-weight:700;color:${state?'var(--text3)':layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${state?'text-decoration:line-through;':''}">${state==='leave'?'🚫':state==='teacherOff'?'⛔':isTrial(s)?'🌱':''}${s.name}</div>
       ${heightPx>30?`<div style="font-size:9px;color:var(--text3);line-height:1.2;white-space:nowrap;overflow:hidden;">${norm}${dur!==60?` ${dur}分`:''}</div>`:''}
     </div>`;
   }).join('');
@@ -3490,14 +3586,15 @@ function renderSchedule(){
 let stuFilter2='全部';
 function renderStudents(){
   stuFilter2=stuFilter;
-  const filters=['全部',...CLASSROOMS.map(c=>c.name),'約課制','暫停/不上課'];
+  const filters=['全部',...CLASSROOMS.map(c=>c.name),'約課制','體驗','暫停/不上課'];
   document.getElementById('filter-scroll').innerHTML=filters.map(f=>
     `<div class="chip${stuFilter===f?' active':''}" onclick="setStuFilter('${f}')">${f}</div>`).join('');
 
   let list=students;
   const q=cleanName(document.getElementById('stu-search')?.value||'');
   if(q) list=students.filter(s=>cleanName(s.name).includes(q)||nicksOf(s).some(n=>n.includes(q)));
-  else if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status!=='正常上課');
+  else if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status==='暫停上課'||s.status==='不上課');
+  else if(stuFilter==='體驗') list=students.filter(isTrial);
   else if(stuFilter==='約課制') list=students.filter(s=>isBooking(s)&&s.status!=='不上課');
   else if(stuFilter!=='全部') list=students.filter(s=>s.room===stuFilter&&s.status==='正常上課');
   else list=students.filter(s=>s.status==='正常上課');
@@ -3606,13 +3703,14 @@ function renderDetail(id){
           <div class="dh-name">${s.name}</div>
           <div class="dh-tags">
             <span class="dh-tag ${rc.tag}">${rc.icon} ${s.room}</span>
-            ${isBooking(s)?`<span class="dh-tag" style="background:rgba(200,168,74,0.15);color:#c8a84a;">約課制</span>`:''}
+            ${isTrial(s)?'':isBooking(s)?`<span class="dh-tag" style="background:rgba(200,168,74,0.15);color:#c8a84a;">約課制</span>`:''}
             ${s.startDate?`<span class="dh-tag" style="background:var(--card2);color:var(--text2);">📅 ${s.startDate.slice(0,7).replace('-','/')} 開始・${(()=>{const a=new Date(s.startDate+'T00:00:00Z'),b=new Date(twToday()+'T00:00:00Z');let m=(b.getUTCFullYear()-a.getUTCFullYear())*12+b.getUTCMonth()-a.getUTCMonth();if(b.getUTCDate()<a.getUTCDate())m--;m=Math.max(0,m);return m>=12?`${Math.floor(m/12)} 年${m%12?` ${m%12} 個月`:''}`:`${m} 個月`;})()}</span>`:''}
             <span class="dh-tag" style="background:var(--card2);color:var(--text2);">${isBooking(s)?'暫定':''}${s.day||'—'}</span>
             <span class="dh-tag" style="background:var(--card2);color:var(--text2);">🕐 ${s.time||'未設定'}${s.duration&&s.duration!=='60'?' · '+s.duration+'分':''}</span>
             <span class="dh-tag ${statusTag(s.status)}">${s.status}</span>
           </div>
           ${contactHtml(s)}
+          ${isTrial(s)?`<button class="add-rec-btn" style="margin-top:10px;" onclick="convertTrial('${s.id}')">🎉 轉為正式學生</button>`:''}
         </div>
       </div>
       ${s.note?`<div class="dh-note">📝 ${s.note}</div>`:''}
@@ -3628,7 +3726,7 @@ function renderDetail(id){
     </div>
     <div class="rec-section-head">
       <div class="sec-line"><div class="section-title">近期課程</div><div class="rec-count" id="leave-stat"></div></div>
-      <button class="add-rec-btn" onclick="openBooking('${id}')">＋ ${isBooking(s)?'約課':'補課'}</button>
+      <button class="add-rec-btn" onclick="openBooking('${id}')">＋ ${bookWord(s)}</button>
     </div>
     <div id="upcoming-list" style="margin-bottom:18px;"></div>
     <div id="leave-records"></div>
@@ -3734,7 +3832,7 @@ function confirmDeleteStudent(id){
   const s=students.find(x=>x.id===id);
   showConfirm('刪除學生',`確定要刪除「${s?.name||''}」嗎？此操作無法復原。`,async()=>{
     try{
-      if(gcalValid()){try{await removeStudentFromCal(id);weekKey=null;todayKey=null;}catch(e){console.error(e);}}
+      if(gcalValid()){try{await removeStudentFromCal(id);weekKey=null;weekCache={};todayKey=null;}catch(e){console.error(e);}}
       await deletePage(id);
       await loadStudents();
       showPage(detailFrom==='classroom'?'classroom':'students');
@@ -3821,6 +3919,12 @@ function openAddStudent(){
   document.getElementById('sheet-student').classList.add('show');
 }
 
+function convertTrial(id){
+  editStudent(id);
+  document.getElementById('stu-status').value='正常上課';
+  document.getElementById('stu-booking').value='每週固定';
+  showToast('請確認星期和上課時間，儲存後會自動排進每週課表');
+}
 function editStudent(id){
   closePopup();
   const s=students.find(x=>x.id===id);if(!s)return;
@@ -3876,7 +3980,7 @@ async function saveStudent(){
     if(miss.length) showToast(`⚠️ Notion 尚未建立「${miss.join('、')}」欄位`);
     if(gcalValid()){
       const st=students.find(x=>x.id===sid);
-      if(st){try{await syncStudent(st);weekKey=null;todayKey=null;}catch(e){showToast('⚠️ 已存到 Notion，但日曆同步失敗：'+e.message);}}
+      if(st){try{await syncStudent(st);weekKey=null;weekCache={};todayKey=null;}catch(e){showToast('⚠️ 已存到 Notion，但日曆同步失敗：'+e.message);}}
     }
     closeSheet('sheet-student');
     document.getElementById('stu-name').disabled=false;
