@@ -258,6 +258,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div id="cmd-box"></div>
       <div id="unrec-card"></div>
       <div id="gcal-panel" style="display:none;"></div>
+      <div id="home-version" style="text-align:center;font-size:11px;color:var(--text3);margin:18px 0 8px;"></div>
     </div>
     <div class="page" id="page-rooms">
       <button class="back-bar" onclick="goBack('settings')">‹ 設定</button>
@@ -899,7 +900,7 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.03-6';
+const APP_VERSION='2026.10.04-1';
 const AUTH_WORKER='https://notion-proxy.doristtn.workers.dev';
 let gRT=null,gCodeClient=null,gRefreshing=null,gLegacy=false;
 try{gRT=localStorage.getItem('g_rt');}catch(e){}
@@ -1115,6 +1116,15 @@ function nowLineHtml(){
   const top=(min-START_H*60)/60*ROW_H;
   return`<div style="position:absolute;top:${top}px;left:calc(36px + ${di} * ${COL});width:calc(${COL});height:0;border-top:2px solid #e5484d;z-index:20;pointer-events:none;">
     <div style="position:absolute;left:-5px;top:-6px;width:10px;height:10px;border-radius:50%;background:#e5484d;"></div></div>`;
+}
+let scheduleScrollPending=false;
+function scrollScheduleToNow(){
+  if(curPage!=='schedule'||weekOffset!==0) return;
+  const el=document.querySelector('#now-line > div');
+  if(!el) return;
+  scheduleScrollPending=false;
+  const y=el.getBoundingClientRect().top+window.scrollY-window.innerHeight*0.35;
+  window.scrollTo({top:Math.max(0,y),behavior:'smooth'});
 }
 function updateNowLine(){const el=document.getElementById('now-line');if(el)el.innerHTML=nowLineHtml();}
 setInterval(()=>{if(curPage==='schedule')updateNowLine();},60000);
@@ -3200,8 +3210,9 @@ function showPage(id){
   if(id==='settings') renderSettings();
   if(id==='subs') renderSubs();
   if(id==='rooms') renderHome();
-  if(id==='schedule') renderSchedule();
+  if(id==='schedule'){renderSchedule();if(!navFromPop){window.scrollTo(0,0);scheduleScrollPending=true;requestAnimationFrame(()=>requestAnimationFrame(scrollScheduleToNow));}}
   if(id==='students'){renderStudents();if(!navFromPop)requestAnimationFrame(()=>requestAnimationFrame(scrollStudentsToToday));else updateStickyVars();}
+  else if(id!=='schedule'&&!navFromPop) window.scrollTo(0,0);
   document.getElementById('main-content').scrollTop=0;
 }
 
@@ -3228,6 +3239,7 @@ function renderHome(){
   document.getElementById('unrec-card').innerHTML=NOTION_TOKEN?unrecHtml():'';
   if(NOTION_TOKEN) syncDailyReminder();
   document.getElementById('gcal-banner').innerHTML=gcalBannerHtml();
+  document.getElementById('home-version').textContent='版本 '+APP_VERSION;
   document.getElementById('alerts').innerHTML=NOTION_TOKEN&&gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'';
   document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
   const cb=document.getElementById('cmd-box');
@@ -3263,7 +3275,7 @@ function renderSchedule(){
   const wrap=document.getElementById('schedule-wrap');
   wrap.style.padding='0';
   wrap.style.overflowX='visible';updateStickyVars();
-  setTimeout(updateNowLine,0);
+  setTimeout(()=>{updateNowLine();if(scheduleScrollPending)scrollScheduleToNow();},0);
 
   // 頂部星期列
   const dayHeaders=`<div style="display:grid;grid-template-columns:36px repeat(7,1fr);background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:var(--hdr,68px);z-index:30;">
@@ -3388,8 +3400,7 @@ function renderSchedule(){
   ${!useCal?`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);"><div style="flex:1;">未連接 Google 日曆，目前顯示 Notion 的固定課表</div><button style="${nb}color:var(--accent);" onclick="gcalConnect()">連接</button></div>`
     :(!calReady?`<div style="padding:8px 12px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);">讀取 Google 日曆中…</div>`:'')}`;
   wrap.innerHTML=`<div style="min-width:340px;">
-    ${navBar}
-    ${dayHeaders}
+    <div style="position:sticky;top:var(--hdr,68px);z-index:30;">${navBar}${dayHeaders.replace('position:sticky;top:var(--hdr,68px);z-index:30;','')}</div>
     <div style="position:relative;height:${totalH}px;overflow:hidden;">
       ${gridLines}
       ${leaveBlocks}
