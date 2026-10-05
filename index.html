@@ -235,6 +235,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div class="header-title" id="header-title">首頁</div>
       <div class="header-sub" id="header-date"></div>
     </div>
+    <button id="header-bell" onclick="showPage('feed')" aria-label="最新動態" style="position:absolute;right:14px;bottom:12px;background:none;border:none;color:var(--text2);cursor:pointer;padding:6px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg></button>
   </div>
   <!-- 漂浮按鈕 -->
   <button class="fab" id="header-btn" onclick="openLeave()">＋ 請假</button>
@@ -247,10 +248,9 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div id="gcal-banner"></div>
       <div id="update-banner"></div>
       <div class="dash-hero" style="position:relative;">
-        <button onclick="showPage('feed')" aria-label="最新動態" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--text2);cursor:pointer;padding:4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg></button>
         <div class="hero-drum"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" style="color:var(--accent)"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="40.5" y1="9" x2="40.5" y2="28"/><g transform="rotate(-12 40.5 8.5)"><ellipse cx="40.5" cy="8.5" rx="6.5" ry="1.3"/><path d="M39 7.4 Q40.5 5.6 42 7.4"/></g><line x1="8" y1="13.5" x2="8" y2="42"/><ellipse cx="8" cy="11" rx="5.8" ry="1.1"/><path d="M6.7 10 Q8 8.6 9.3 10"/><ellipse cx="8" cy="13.6" rx="5.8" ry="1.1"/><path d="M17.2 15.5 A3.6 3.6 0 1 1 23.6 12.4 Q25 12.1 26.4 12.4 A3.6 3.6 0 1 1 32.8 15.5 Q35 20 31 27 L19 27 Q15 20 17.2 15.5 Z" fill="#0c180c"/><circle cx="20.6" cy="12.6" r="0.9" fill="currentColor" stroke="none"/><circle cx="29.4" cy="12.6" r="0.9" fill="currentColor" stroke="none"/><path d="M22.4 18.3 Q25 20 27.6 18.3"/><circle cx="25" cy="33" r="9.5" fill="#0c180c"/><circle cx="25" cy="33" r="3.2" stroke-width="1.2"/><line x1="18.2" y1="41.5" x2="16.5" y2="44.5"/><line x1="31.8" y1="41.5" x2="33.5" y2="44.5"/><ellipse cx="10" cy="27" rx="6" ry="1.9" fill="#0c180c"/><path d="M4 27 V30.5 A6 1.9 0 0 0 16 30.5 V27" fill="#0c180c"/><line x1="7" y1="32.3" x2="5" y2="42"/><line x1="13" y1="32.3" x2="15" y2="42"/><ellipse cx="41" cy="29" rx="5.5" ry="1.9" fill="#0c180c"/><path d="M35.5 29 V37 A5.5 1.9 0 0 0 46.5 37 V29" fill="#0c180c"/><line x1="37" y1="38.7" x2="36.6" y2="44"/><line x1="45" y1="38.7" x2="45.4" y2="44"/></g></svg></div>
         <div class="hero-text">
-          <div class="ht1">阿森Asen｜工作&爵士鼓教學系統</div>
+          <div class="ht1">阿森Asen🥁｜工作&鼓教學系統</div>
           <div class="ht2" id="hero-date"></div>
         </div>
       </div>
@@ -695,7 +695,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     <div class="sheet-body">
       <div class="form-label" style="margin-bottom:8px;">理由（選填）</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
-        <button class="chip" onclick="pickReason('生病')">生病</button><button class="chip" onclick="pickReason('出遊')">出遊</button><button class="chip" onclick="pickReason('學校活動')">學校活動</button><button class="chip" onclick="pickReason('家裡有事')">家裡有事</button><button class="chip" onclick="pickReason('回南部')">回南部</button>
+        <button class="chip" onclick="pickReason('生病')">生病</button><button class="chip" onclick="pickReason('出遊')">出遊</button><button class="chip" onclick="pickReason('學校活動')">學校活動</button><button class="chip" onclick="pickReason('家裡有事')">家裡有事</button><button class="chip" onclick="pickReason('回南部')">回南部</button><button class="chip" onclick="pickReason('曠課')">曠課</button>
       </div>
       <input class="form-input" id="lr-text" placeholder="可自己輸入，或留空">
       <div style="font-size:11px;color:var(--text3);margin-top:8px;">會留下請假紀錄，之後可恢復。</div>
@@ -964,8 +964,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.06-3';
+const APP_VERSION='2026.10.06-4';
 const CHANGELOG=[
+  {v:'2026.10.06-4',items:['最新動態的 🔔 移到首頁上方標題列右邊','首頁標題改成「阿森Asen🥁｜工作&鼓教學系統」','學生頁「近期課程」也會顯示最近兩週已經過去的課，事後才想到要登記請假或曠課也能處理','請假理由新增「曠課」']},
   {v:'2026.10.06-3',items:['修正：上課紀錄超過 100 筆時，較舊的紀錄讀不到（匯入後看不到、星星累積少算）','設定頁新增「清除重複的上課紀錄」，處理重複匯入產生的紀錄']},
   {v:'2026.10.06-2',items:['修正：點歌儲存失敗（Notion 400），改成依資料庫實際的欄位類型寫入','Notion 錯誤訊息會顯示詳細原因，方便排查']},
   {v:'2026.10.06-1',items:['學生頁新增「點歌」：顯示兩首、可展開，點歌名直接開 YouTube（沒填連結就搜尋歌名），按「✅ 完成」就收進「已學會」','新增上課紀錄時可以寫「待辦」，一行一項，期限自動設成下一堂課','首頁新增待辦清單，勾選就完成；快到期黃色、過期紅色','今日課程有待辦的學生會標 ☑️']},
@@ -1323,7 +1324,8 @@ async function loadUpcoming(sid){
     const owed=Math.max(0,leaves.length-makeups.length);
     if(statBox) statBox.textContent=s&&!isBooking(s)?`・請假 ${leaves.length}・已補 ${makeups.length}・待補 ${owed}`:'';
     const now=Date.now();
-    const up=all.filter(e=>new Date(e.end.dateTime).getTime()>=now).slice(0,5);
+    const past=all.filter(e=>new Date(e.end.dateTime).getTime()<now&&new Date(e.start.dateTime).getTime()>now-14*86400000).slice(-2);
+    const up=past.concat(all.filter(e=>new Date(e.end.dateTime).getTime()>=now).slice(0,5));
     box.innerHTML=up.length===0?`<div class="rec-empty" style="padding:18px;">目前沒有排定的課程</div>`:up.map(lessonRow).join('');
     if(recBox){changeAll=all;renderChanges();}
   }catch(e){box.innerHTML=`<div class="rec-empty" style="padding:18px;color:var(--red);">${e.message}</div>`;}
@@ -1361,7 +1363,8 @@ function lessonRow(ev){
   const dur=(new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000;
   const pr=ev.extendedProperties?.private||{};const st=evState(ev);
   const isB=pr.kind==='booking',isMk=pr.makeup==='1';
-  let label=st==='leave'?'🚫 請假'+(pr.reason?'・'+esc(pr.reason):''):st==='teacherOff'?'⛔ 老師停課':isMk?'補課':pr.logged==='1'?'補登':isB?'約課':'固定課';
+  const isPast=new Date(ev.end.dateTime).getTime()<Date.now();
+  let label=(isPast?'已過・':'')+(st==='leave'?'🚫 請假'+(pr.reason?'・'+esc(pr.reason):''):st==='teacherOff'?'⛔ 老師停課':isMk?'補課':pr.logged==='1'?'補登':isB?'約課':'固定課');
   if(pr.moved==='1'&&!st){
     const o=ev.originalStartTime?.dateTime||pr.origStart;
     label+=(pr.fromOff==='1'?'・停課改期':'・已調課')+(o?`（原 ${fmtMD(evParts(o).date).split(' ')[0]} ${evParts(o).hhmm}）`:'');
@@ -1372,6 +1375,7 @@ function lessonRow(ev){
   else if(st==='teacherOff') btn=`<button onclick="openReschedule('${ev.id}')" style="${smallBtn('var(--text2)')}">調課</button>`;
   else if(isB) btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('var(--red)')}">${isMk?'取消補課':'取消約課'}</button>`;
   else btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('#c8a84a')}">請假</button>`;
+  if(isPast) btn=btn.replace(mv,'');
   btn=btn?`<div style="display:flex;gap:6px;flex-shrink:0;">${btn}</div>`:'';
   return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;${st?'opacity:0.6;':''}">
     <div style="flex:1;min-width:0;">
@@ -3087,7 +3091,7 @@ const HELP=[
   ['搜尋與篩選','上方搜尋欄可以打名字或暱稱；篩選有各教室、約課制、體驗、暫停／不上課。'],
   ['新增學生','右下「＋ 學生」。排課方式選「每週固定」會自動排進每週課表；「約課制」只有約好才出現。'],
   ['暱稱','可填好幾個，用空格分開。指令框、搜尋、匯出課表都會用暱稱。'],
-  ['近期課程','學生頁列出接下來 5 堂，每堂可以「調課」「請假」；約課、補課則是「調課」「取消」。'],
+  ['近期課程','學生頁列出最近兩週已上過的課（標示「已過」）和接下來 5 堂。每堂可以「調課」「請假」；已經過去的課只能請假或取消，事後才知道學生請假或曠課也能補登。'],
   ['課程異動紀錄','請假、停課、調課、補課，預設顯示前後一個月，可展開全部。'],
   ['上課紀錄','「＋ 新增」寫一堂（上課內容、上課狀況／其他事項）；「匯入」可以一次貼上很多堂（日期一行、內容在下面）；「匯出」整理成給家長看的文字。網址會變成可點的連結。'],
   ['轉為正式學生','體驗課學生頁有「🎉 轉為正式學生」，確認星期和時間後儲存，就會排進每週課表。'],
@@ -3792,7 +3796,8 @@ function showPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
-  const titles={feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
+  {const hb=document.getElementById('header-bell');if(hb)hb.style.display=id==='home'?'':'none';}
+const titles={feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
