@@ -258,6 +258,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div id="alerts"></div>
       <div id="checkin-card"></div>
       <div id="cmd-box"></div>
+      <div id="todo-home"></div>
       <div id="unrec-card"></div>
       <div id="gcal-panel" style="display:none;"></div>
       <div id="home-version" style="text-align:center;font-size:11px;color:var(--text3);margin:18px 0 8px;"></div>
@@ -360,6 +361,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
       <div class="form-group"><label class="form-label">上課內容</label><textarea class="form-textarea" id="rec-content" placeholder="練習內容、曲目…"></textarea></div>
       <div class="form-group"><label class="form-label">上課狀況／其他事項</label><textarea class="form-textarea" id="rec-status" placeholder="今天表現、其他備註…"></textarea></div>
       <input type="hidden" id="rec-note">
+      <div class="form-group"><label class="form-label">待辦（一行一項，會出現在首頁）</label><textarea class="form-textarea" id="rec-todo" style="min-height:56px;" placeholder="例：印掉了的譜"></textarea></div>
       <div class="form-group">
         <label class="form-label">⭐ 超級讚</label>
         <div class="star-picker" id="star-picker">
@@ -705,6 +707,23 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
   </div>
 </div>
 
+<!-- SONG SHEET -->
+<div class="overlay" id="sheet-song">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="song-title">🎵 點歌</div>
+    <div class="sheet-body">
+      <div class="form-group"><label class="form-label">歌名</label><input class="form-input" id="song-name" placeholder="例：Galway Girl" onkeydown="if(event.key==='Enter'&&!event.isComposing)saveSong()"></div>
+      <div class="form-group"><label class="form-label">YouTube 連結（選填）</label><input class="form-input" id="song-url" placeholder="沒填就自動搜尋歌名"></div>
+      <button id="song-del" class="btn-cancel" style="width:100%;color:var(--red);" onclick="deleteSong()">刪除這首歌</button>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-song')">取消</button>
+      <button class="btn-save" onclick="saveSong()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -938,8 +957,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.05-1';
+const APP_VERSION='2026.10.06-1';
 const CHANGELOG=[
+  {v:'2026.10.06-1',items:['學生頁新增「點歌」：顯示兩首、可展開，點歌名直接開 YouTube（沒填連結就搜尋歌名），按「✅ 完成」就收進「已學會」','新增上課紀錄時可以寫「待辦」，一行一項，期限自動設成下一堂課','首頁新增待辦清單，勾選就完成；快到期黃色、過期紅色','今日課程有待辦的學生會標 ☑️']},
   {v:'2026.10.05-1',items:['修正九月薪資：收款名稱或日期跟月份對不上時不會算進去；改成名稱開頭沒有月份就用收到日期往前推一個月','修正：同一個月有獎金又有收款時，收款沒算進應領','獎金、紅包等額外收入算作已收；沒填日期或金額的收款不再顯示 NaN','首頁右上角新增 🔔 最新動態：分「行程」和「上課紀錄」，依時間列出最近的變動','上課紀錄的「上課狀況」和「其他事項」合併成一欄；設定頁可一鍵合併舊紀錄']},
   {v:'2026.10.04-6',items:['泰順按「下班」後 30 分鐘會提醒填時數，23:30 的提醒照舊，按「完成」兩個一起取消','薪資收款可以一個月記很多次，按鈕改名「＋ 記錄收款」，顯示「已收／應領」','藝文每筆「滿四堂」旁邊有自己的「收到了」按鈕','設定頁新增「薪資」區，放薪資紀錄和計薪規則；「說明」移到最下面']},
   {v:'2026.10.04-5',items:['課表新增「Week／Day」切換，Day 模式只看一天，顯示教室和狀態','設定頁新增「操作教學」，依功能分類、可搜尋，之後每次更新會一起修改']},
@@ -2230,7 +2250,7 @@ function unrecHtml(){
       <div onclick="${st?'':`toggleToday('${e.id}')`}" style="display:flex;gap:10px;padding:9px 0;align-items:flex-start;${st?'opacity:0.5;':'cursor:pointer;'}">
         <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${p.hhmm}</div>
         <div style="flex:1;min-width:0;">
-          <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${!sub&&isTrial(students.find(x=>x.id===sid))?'🌱 ':''}${esc(name)}</div><div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">・${sub2}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
+          <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${!sub&&isTrial(students.find(x=>x.id===sid))?'🌱 ':''}${esc(name)}${!sub&&todos.some(t=>t.sid===sid)?' <span style="font-size:11px;" title="有待辦">☑️</span>':''}</div><div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">・${sub2}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
         </div>
       </div>${detail}</div>`;
   }).join('')+`</div>`;
@@ -3035,6 +3055,12 @@ const HELP=[
   ['重新整理','點底部的首頁圖示，會重新抓取 Notion 和日曆的最新資料。'],
   ['＋ 請假','右下角按鈕是「老師請假」，學生請假要到學生頁或用指令框。'],
  ]},
+ {t:'🎵 點歌與 ☑️ 待辦',items:[
+  ['點歌','學生頁「＋ 點歌」輸入歌名，連結可以不填。點歌名會開 YouTube：有連結就開那支影片，沒有就搜尋歌名。'],
+  ['點歌狀態','點「想學／練習中」切換狀態；學會了按「✅ 完成」，會收進「已學會」，需要時可以點開恢復。按 ✎ 可以修改或刪除。'],
+  ['待辦','寫上課紀錄時在「待辦」欄一行打一項，例如「印掉了的譜」。期限自動設成那位學生的下一堂課。'],
+  ['完成待辦','首頁或學生頁的待辦，勾左邊的方框就完成。明天要上課的是黃色，過期是紅色。'],
+ ]},
  {t:'🔔 最新動態',items:[
   ['在哪裡','首頁標題卡右上角的鈴鐺。'],
   ['行程','最近的請假、停課、調課、補課、代課、老師請假和新增學生，依時間排列。'],
@@ -3193,6 +3219,117 @@ async function mergeOldNotes(){
     }
     mergeBusy=false;await loadRecords();showToast(`✅ 已合併 ${ok} 筆`);if(curPage==='settings')renderSettings();
   },'合併');
+}
+
+// ══════════ 點歌清單 ══════════
+const DB_SONGS='3f0d68e58caf8085ad45c05b6f3825c2';
+const DB_TODOS='3f0d68e58caf80cab08ccc0404d4d995';
+let songs=[],todos=[],songExpand={},songDoneOpen={};
+async function queryAll(db,body){
+  let out=[],cursor=null,guard=0;
+  do{const b={page_size:100,...(body||{})};if(cursor)b.start_cursor=cursor;
+    const d=await notionAPI('POST',`/databases/${db}/query`,b);out=out.concat(d.results||[]);cursor=d.has_more?d.next_cursor:null;}while(cursor&&++guard<20);
+  return out;
+}
+async function loadSongs(){
+  try{songs=(await queryAll(DB_SONGS,{sorts:[{property:'點歌日',direction:'descending'}]})).map(p=>({id:p.id,name:gp(p,'歌名','title'),sid:gp(p,'學生','relation'),url:p.properties?.['連結']?.url||'',status:gp(p,'狀態','select')||'想學',date:gp(p,'點歌日','date')||''}));}
+  catch(e){console.warn('songs',e.message);songs=[];}
+}
+function songLink(sg){return sg.url||('https://www.youtube.com/results?search_query='+encodeURIComponent(sg.name));}
+function songsHtml(sid){
+  const mine=songs.filter(x=>x.sid===sid);
+  const act=mine.filter(x=>x.status!=='學會了');const done=mine.filter(x=>x.status==='學會了');
+  const exp=!!songExpand[sid];const show=exp?act:act.slice(0,2);
+  const row=sg=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--border);">
+    <a href="${esc(songLink(sg))}" target="_blank" rel="noopener" style="flex:1;min-width:0;font-size:14px;color:var(--text);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🎵 ${esc(sg.name)} <span style="font-size:11px;color:#ff6b6b;">▶</span></a>
+    ${sg.status==='學會了'?`<button style="${smallBtn('var(--text3)')}" onclick="setSongStatus('${sg.id}','想學')">恢復</button>`
+      :`<button style="${smallBtn(sg.status==='練習中'?'#5aa9e6':'var(--text3)')}" onclick="setSongStatus('${sg.id}','${sg.status==='練習中'?'想學':'練習中'}')">${sg.status}</button><button class="add-rec-btn" style="padding:4px 10px;font-size:12px;" onclick="setSongStatus('${sg.id}','學會了')">✅ 完成</button>`}
+    <button style="background:none;border:none;color:var(--text3);cursor:pointer;padding:0 2px;" onclick="openSong('${sid}','${sg.id}')">✎</button></div>`;
+  return`<div class="rec-section-head"><div class="sec-line"><div class="section-title">點歌</div><div class="rec-count">・${act.length} 首</div></div>
+      <button class="add-rec-btn" onclick="openSong('${sid}')">＋ 點歌</button></div>
+    <div style="margin-bottom:18px;">${act.length?show.map(row).join(''):'<div class="rec-empty" style="padding:12px;">還沒有點歌</div>'}
+    ${act.length>2?`<div style="text-align:center;padding-top:6px;"><button style="${smallBtn('var(--text2)')}" onclick="songExpand['${sid}']=!songExpand['${sid}'];renderDetail('${sid}')">${exp?'收起':`展開（+${act.length-2}）`}</button></div>`:''}
+    ${done.length?`<div style="padding-top:6px;"><button style="background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;padding:0;" onclick="songDoneOpen['${sid}']=!songDoneOpen['${sid}'];renderDetail('${sid}')">已學會 ${done.length} 首 ${songDoneOpen[sid]?'▴':'▾'}</button>${songDoneOpen[sid]?done.map(row).join(''):''}</div>`:''}</div>`;
+}
+let songCtx=null;
+function openSong(sid,songId){
+  const sg=songId?songs.find(x=>x.id===songId):null;songCtx={sid,id:songId||null};
+  const s=students.find(x=>x.id===sid);
+  document.getElementById('song-title').textContent=`🎵 ${s?s.name:''}｜${sg?'修改點歌':'點歌'}`;
+  document.getElementById('song-name').value=sg?sg.name:'';
+  document.getElementById('song-url').value=sg?sg.url:'';
+  document.getElementById('song-del').style.display=sg?'':'none';
+  document.getElementById('sheet-song').classList.add('show');
+  setTimeout(()=>document.getElementById('song-name').focus(),200);
+}
+async function saveSong(){
+  const name=document.getElementById('song-name').value.trim();const url=document.getElementById('song-url').value.trim();
+  if(!name){showToast('請輸入歌名');return;}
+  const props={'歌名':{title:[{text:{content:name}}]},'連結':{url:url||null}};
+  try{
+    if(songCtx.id) await notionAPI('PATCH',`/pages/${songCtx.id}`,{properties:props});
+    else await notionAPI('POST','/pages',{parent:{database_id:DB_SONGS},properties:{...props,'學生':{relation:[{id:songCtx.sid}]},'狀態':{select:{name:'想學'}},'點歌日':{date:{start:twToday()}}}});
+    closeSheet('sheet-song');showToast('✅ 已儲存點歌');await loadSongs();if(curPage==='detail')renderDetail(songCtx.sid);
+  }catch(e){showToast('❌ '+e.message);}
+}
+function deleteSong(){
+  if(!songCtx?.id)return;
+  showConfirm('刪除點歌','確定刪除這首歌？',async()=>{
+    try{await notionAPI('PATCH',`/pages/${songCtx.id}`,{archived:true});closeSheet('sheet-song');await loadSongs();if(curPage==='detail')renderDetail(songCtx.sid);}catch(e){showToast('❌ '+e.message);}
+  });
+}
+async function setSongStatus(id,st){
+  const sg=songs.find(x=>x.id===id);if(!sg)return;
+  const old=sg.status;sg.status=st;if(curPage==='detail')renderDetail(sg.sid);
+  try{await notionAPI('PATCH',`/pages/${id}`,{properties:{'狀態':{select:{name:st}}}});if(st==='學會了')showToast(`🎉 ${sg.name} 學會了`);}
+  catch(e){sg.status=old;showToast('❌ '+e.message);if(curPage==='detail')renderDetail(sg.sid);}
+}
+
+// ══════════ 待辦 ══════════
+async function loadTodos(){
+  try{todos=(await queryAll(DB_TODOS,{filter:{property:'完成',checkbox:{equals:false}}})).map(p=>({id:p.id,text:gp(p,'內容','title'),sid:gp(p,'學生','relation'),due:gp(p,'期限','date')||''}));}
+  catch(e){console.warn('todos',e.message);todos=[];}
+}
+async function nextLessonDate(sid,afterDate){
+  try{
+    const d=await gcal('GET','/events',null,[['privateExtendedProperty',`studentId=${sid}`],['timeMin',twISO(addDays(afterDate,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','6']]);
+    const ev=(d&&d.items||[]).find(e=>e.status!=='cancelled'&&e.start?.dateTime&&!evState(e));
+    return ev?evParts(ev.start.dateTime).date:null;
+  }catch(e){return null;}
+}
+async function createTodos(sid,lines,fromDate){
+  if(!lines.length) return;
+  const due=await nextLessonDate(sid,fromDate||twToday());
+  for(const t of lines){
+    try{await notionAPI('POST','/pages',{parent:{database_id:DB_TODOS},properties:{'內容':{title:[{text:{content:t.slice(0,200)}}]},'學生':{relation:[{id:sid}]},'完成':{checkbox:false},...(due?{'期限':{date:{start:due}}}:{})}});}catch(e){console.warn(e);}
+  }
+  await loadTodos();
+}
+async function doneTodo(id){
+  const t=todos.find(x=>x.id===id);todos=todos.filter(x=>x.id!==id);
+  if(curPage==='home') renderHome();if(curPage==='detail'&&t) renderDetail(t.sid);
+  try{await notionAPI('PATCH',`/pages/${id}`,{properties:{'完成':{checkbox:true}}});showToast('✅ 完成');}
+  catch(e){if(t)todos.push(t);showToast('❌ '+e.message);if(curPage==='home')renderHome();}
+}
+function todoRow(t,showName){
+  const s=students.find(x=>x.id===t.sid);const td=twToday();
+  const col=!t.due?'var(--text3)':t.due<td?'var(--red)':t.due<=addDays(td,1)?'#c8a84a':'var(--text3)';
+  const when=!t.due?'沒有下一堂課':t.due<td?`已過期・${fmtMD(t.due)}`:t.due===td?'今天上課':`下次上課 ${fmtMD(t.due)}`;
+  return`<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-top:1px solid var(--border);">
+    <button onclick="doneTodo('${t.id}')" aria-label="完成" style="width:20px;height:20px;flex-shrink:0;margin-top:1px;border-radius:5px;border:1.5px solid var(--text3);background:none;cursor:pointer;"></button>
+    <div style="flex:1;min-width:0;"><div style="font-size:14px;color:var(--text);">${esc(t.text)}</div>
+    <div style="font-size:11px;color:${col};">${showName&&s?esc(s.name)+'・':''}${when}</div></div></div>`;
+}
+function todoHomeHtml(){
+  if(!todos.length) return '';
+  const list=[...todos].sort((a,b)=>(a.due||'9999')<(b.due||'9999')?-1:1);
+  return`<div style="margin:0 16px 10px;"><div class="sec-line" style="margin-bottom:6px;"><div class="section-title">待辦</div><div class="rec-count">・${list.length} 項</div></div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:2px 12px 4px;">${list.map(t=>todoRow(t,true)).join('').replace('border-top:1px solid var(--border);','')}</div></div>`;
+}
+function todoStudentHtml(sid){
+  const list=todos.filter(t=>t.sid===sid);if(!list.length) return '';
+  return`<div class="rec-section-head"><div class="sec-line"><div class="section-title">待辦</div><div class="rec-count">・${list.length} 項</div></div></div>
+    <div style="margin-bottom:18px;">${list.map(t=>todoRow(t,false)).join('')}</div>`;
 }
 
 function renderChangelog(){
@@ -3568,7 +3705,7 @@ async function refreshAll(){
   refreshing=true;showToast('🔄 更新中…');
   try{
     weekKey=null;weekCache={};todayKey=null;
-    await Promise.all([loadStudents(),loadRecords()]);
+    await Promise.all([loadStudents(),loadRecords(),loadSongs(),loadTodos()]);
     if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);autoCheckin(true);}
     if(curPage==='home') renderHome();
     showToast('✅ 已更新');
@@ -3638,6 +3775,7 @@ function renderHome(){
   document.getElementById('update-banner').innerHTML=updateBannerHtml();
   document.getElementById('alerts').innerHTML=NOTION_TOKEN&&gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'';
   document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
+  document.getElementById('todo-home').innerHTML=NOTION_TOKEN?todoHomeHtml():'';
   const cb=document.getElementById('cmd-box');
   if(!NOTION_TOKEN||!gcalValid()) cb.innerHTML='';
   else if(!document.getElementById('cmd-input')) cb.innerHTML=cmdBoxHtml();
@@ -3971,6 +4109,8 @@ function renderDetail(id){
       <button class="add-rec-btn" onclick="openBooking('${id}')">＋ ${bookWord(s)}</button>
     </div>
     <div id="upcoming-list" style="margin-bottom:18px;"></div>
+    ${todoStudentHtml(id)}
+    ${songsHtml(id)}
     <div id="leave-records"></div>
     <div class="rec-section-head">
       <div class="sec-line"><div class="section-title">上課紀錄</div><div class="rec-count">・${recs.length} 筆・由新到舊</div></div>
@@ -4129,6 +4269,9 @@ async function saveRecord(){
     };
     if(editingRecordId) await updateRecord(editingRecordId,data);
     else await createRecord(data);
+    const todoLines=(document.getElementById('rec-todo').value||'').split('\n').map(x=>x.trim()).filter(Boolean);
+    if(todoLines.length) await createTodos(data.studentId,todoLines,data.date);
+    document.getElementById('rec-todo').value='';
     await loadRecords();
     closeSheet('sheet-record');
     document.getElementById('rec-student').disabled=false;
@@ -4273,7 +4416,7 @@ async function init(){
   }
   document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
   try{
-    await Promise.all([loadStudents(),loadRecords()]);
+    await Promise.all([loadStudents(),loadRecords(),loadSongs(),loadTodos()]);
     renderHome();
     await ensureGcal();
     if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);renderHome();autoCheckin(true);}
