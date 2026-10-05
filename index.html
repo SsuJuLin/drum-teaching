@@ -773,11 +773,18 @@ async function notionAPI(method,path,body){
   return r.json();
 }
 async function queryDB(dbId,filter,sorts){
-  const body={page_size:100};
-  if(filter) body.filter=filter;
-  if(sorts) body.sorts=sorts;
-  const data=await notionAPI('POST',`/databases/${dbId}/query`,body);
-  return data.results||[];
+  // Notion 一次最多回傳 100 筆，要一頁一頁抓完
+  let out=[],cursor=null,guard=0;
+  do{
+    const body={page_size:100};
+    if(filter) body.filter=filter;
+    if(sorts) body.sorts=sorts;
+    if(cursor) body.start_cursor=cursor;
+    const data=await notionAPI('POST',`/databases/${dbId}/query`,body);
+    out=out.concat(data.results||[]);
+    cursor=data.has_more?data.next_cursor:null;
+  }while(cursor&&++guard<50);
+  return out;
 }
 function gp(page,name,type){
   const p=page.properties?.[name];
@@ -957,8 +964,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.06-2';
+const APP_VERSION='2026.10.06-3';
 const CHANGELOG=[
+  {v:'2026.10.06-3',items:['修正：上課紀錄超過 100 筆時，較舊的紀錄讀不到（匯入後看不到、星星累積少算）','設定頁新增「清除重複的上課紀錄」，處理重複匯入產生的紀錄']},
   {v:'2026.10.06-2',items:['修正：點歌儲存失敗（Notion 400），改成依資料庫實際的欄位類型寫入','Notion 錯誤訊息會顯示詳細原因，方便排查']},
   {v:'2026.10.06-1',items:['學生頁新增「點歌」：顯示兩首、可展開，點歌名直接開 YouTube（沒填連結就搜尋歌名），按「✅ 完成」就收進「已學會」','新增上課紀錄時可以寫「待辦」，一行一項，期限自動設成下一堂課','首頁新增待辦清單，勾選就完成；快到期黃色、過期紅色','今日課程有待辦的學生會標 ☑️']},
   {v:'2026.10.05-1',items:['修正九月薪資：收款名稱或日期跟月份對不上時不會算進去；改成名稱開頭沒有月份就用收到日期往前推一個月','修正：同一個月有獎金又有收款時，收款沒算進應領','獎金、紅包等額外收入算作已收；沒填日期或金額的收款不再顯示 NaN','首頁右上角新增 🔔 最新動態：分「行程」和「上課紀錄」，依時間列出最近的變動','上課紀錄的「上課狀況」和「其他事項」合併成一欄；設定頁可一鍵合併舊紀錄']},
@@ -3206,6 +3214,22 @@ async function renderFeed(){
   }catch(e){wrap.innerHTML=tabs+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
 }
 // ══════════ 合併舊紀錄：其他事項 → 上課狀況／其他事項 ══════════
+function dupRecords(){
+  const seen={},dups=[];
+  [...records].sort((a,b)=>a.id<b.id?-1:1).forEach(r=>{
+    const k=[r.studentId,r.date,(r.content||'').trim()].join('|');
+    if(!r.studentId||!r.date) return;
+    if(seen[k]) dups.push(r); else seen[k]=r;
+  });
+  return dups;
+}
+async function cleanDupRecords(){
+  const d=dupRecords();if(!d.length){showToast('沒有重複的紀錄');return;}
+  showConfirm('清除重複紀錄',`找到 ${d.length} 筆「同一位學生、同一天、內容完全相同」的重複紀錄，會刪除多出來的那幾筆（每組保留一筆）。`,async()=>{
+    let ok=0;for(let i=0;i<d.length;i++){showToast(`清除中 ${i+1}/${d.length}`);try{await notionAPI('PATCH',`/pages/${d[i].id}`,{archived:true});ok++;}catch(e){}}
+    await loadRecords();showToast(`✅ 已清除 ${ok} 筆重複紀錄`);if(curPage==='settings')renderSettings();
+  },'清除');
+}
 let mergeBusy=false;
 async function mergeOldNotes(){
   if(mergeBusy) return;
@@ -3547,6 +3571,7 @@ function renderSettings(){
     setRow('📤','打卡同步到 Notion','把本月打卡補進 Notion',null,`<button style="${smallBtn('var(--text2)')}" onclick="settingsSyncChecks()">${ckSyncText||'同步本月'}</button>`)+
     setRow('📤','課程異動同步到 Notion','請假、停課、調課、補課、代課',null,`<button id="ch-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncChangesToNotion()">${chSyncText||'全部同步'}</button>`)+
     setRow('🔑','更換 Notion 權杖','權杖重新產生後使用','changeToken()')+
+    (dupRecords().length?setRow('🧹','清除重複的上課紀錄',`${dupRecords().length} 筆重複`,null,`<button style="${smallBtn('var(--text2)')}" onclick="cleanDupRecords()">清除</button>`):'')+
     (records.some(r=>(r.note||'').trim())?setRow('🔀','合併舊紀錄的其他事項',`${records.filter(r=>(r.note||'').trim()).length} 筆紀錄還分開存`,null,`<button style="${smallBtn('var(--text2)')}" onclick="mergeOldNotes()">合併</button>`):''));
   h+=setGroup('說明',
     setRow('📖','操作教學','每個功能怎麼用，可搜尋',"showPage('help')"));
