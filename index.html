@@ -698,7 +698,8 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         <button class="chip" onclick="pickReason('生病')">生病</button><button class="chip" onclick="pickReason('出遊')">出遊</button><button class="chip" onclick="pickReason('學校活動')">學校活動</button><button class="chip" onclick="pickReason('家裡有事')">家裡有事</button><button class="chip" onclick="pickReason('回南部')">回南部</button><button class="chip" onclick="pickReason('曠課')">曠課</button>
       </div>
       <input class="form-input" id="lr-text" placeholder="可自己輸入，或留空">
-      <div style="font-size:11px;color:var(--text3);margin-top:8px;">會留下請假紀錄，之後可恢復。</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.6;">「確定請假」：不計薪、可補課（例如曠課初犯算順延，理由選曠課再按確定請假）。<br>「記為曠課」：照常計薪、不用補課。兩種都會留下紀錄、可恢復。</div>
+      <button class="btn-cancel" id="lr-absent" style="width:100%;margin-top:10px;color:#e58a8a;" onclick="saveAbsent()">🚷 記為曠課（照常計薪）</button>
     </div>
     <div class="sheet-footer">
       <button class="btn-cancel" onclick="closeSheet('sheet-lreason')">取消</button>
@@ -964,9 +965,10 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.06-4';
+const APP_VERSION='2026.10.06-5';
 const CHANGELOG=[
-  {v:'2026.10.06-4',items:['最新動態的 🔔 移到首頁上方標題列右邊','首頁標題改成「阿森Asen🥁｜工作&鼓教學系統」','學生頁「近期課程」也會顯示最近兩週已經過去的課，事後才想到要登記請假或曠課也能處理','請假理由新增「曠課」']},
+  {v:'2026.10.06-5',items:['近期課程只顯示最近一週內、已過去的最後一堂','新增「曠課」：照常計薪、不用補課，課表和紀錄以 🚷 標示','曠課初犯要順延的話，用「請假」並選理由「曠課」，就不計薪、可補課','指令框：「小明 10/5 曠課」記為曠課；「小明 10/5 請假 曠課」則是請假']},
+  {v:'2026.10.06-4',items:['最新動態的 🔔 移到首頁上方標題列右邊','首頁標題改成「阿森Asen🥁｜工作&鼓教學系統」','學生頁「近期課程」也會顯示已經過去的課，事後才想到要登記請假或曠課也能處理','請假理由新增「曠課」']},
   {v:'2026.10.06-3',items:['修正：上課紀錄超過 100 筆時，較舊的紀錄讀不到（匯入後看不到、星星累積少算）','設定頁新增「清除重複的上課紀錄」，處理重複匯入產生的紀錄']},
   {v:'2026.10.06-2',items:['修正：點歌儲存失敗（Notion 400），改成依資料庫實際的欄位類型寫入','Notion 錯誤訊息會顯示詳細原因，方便排查']},
   {v:'2026.10.06-1',items:['學生頁新增「點歌」：顯示兩首、可展開，點歌名直接開 YouTube（沒填連結就搜尋歌名），按「✅ 完成」就收進「已學會」','新增上課紀錄時可以寫「待辦」，一行一項，期限自動設成下一堂課','首頁新增待辦清單，勾選就完成；快到期黃色、過期紅色','今日課程有待辦的學生會標 ☑️']},
@@ -1289,7 +1291,7 @@ async function markEvent(ev,state,reason){
   const name=evName(ev);
   const body={...ev};
   delete body.colorId;
-  body.summary=state==='leave'?`🚫 ${name}（請假）`:state==='teacherOff'?`⛔ ${name}（老師停課）`:`🥁 ${name}`;
+  body.summary=state==='leave'?`🚫 ${name}（請假）`:state==='teacherOff'?`⛔ ${name}（老師停課）`:state==='absent'?`🚷 ${name}（曠課）`:`🥁 ${name}`;
   if(state) body.colorId='8';
   body.transparency=state?'transparent':'opaque';
   body.extendedProperties={...(ev.extendedProperties||{}),private:pr};
@@ -1324,7 +1326,7 @@ async function loadUpcoming(sid){
     const owed=Math.max(0,leaves.length-makeups.length);
     if(statBox) statBox.textContent=s&&!isBooking(s)?`・請假 ${leaves.length}・已補 ${makeups.length}・待補 ${owed}`:'';
     const now=Date.now();
-    const past=all.filter(e=>new Date(e.end.dateTime).getTime()<now&&new Date(e.start.dateTime).getTime()>now-14*86400000).slice(-2);
+    const past=all.filter(e=>new Date(e.end.dateTime).getTime()<now&&new Date(e.start.dateTime).getTime()>now-7*86400000).slice(-1);
     const up=past.concat(all.filter(e=>new Date(e.end.dateTime).getTime()>=now).slice(0,5));
     box.innerHTML=up.length===0?`<div class="rec-empty" style="padding:18px;">目前沒有排定的課程</div>`:up.map(lessonRow).join('');
     if(recBox){changeAll=all;renderChanges();}
@@ -1346,7 +1348,8 @@ function renderChanges(){
 function changeRow(e){
   const p=evParts(e.start.dateTime);const pr=e.extendedProperties?.private||{};const st=evState(e);
   let icon,text,btn='';
-  if(st==='leave'){icon='🚫';text='請假'+(pr.reason?'・'+esc(pr.reason):'');btn=`<button onclick="restoreLeave('${e.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;}
+  if(st==='absent'){icon='🚷';text='曠課・照常計薪';btn=`<button onclick="restoreLeave('${e.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;}
+  else if(st==='leave'){icon='🚫';text='請假'+(pr.reason?'・'+esc(pr.reason):'');btn=`<button onclick="restoreLeave('${e.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;}
   else if(st==='teacherOff'){icon='⛔';text='老師停課';}
   else if(pr.moved==='1'){
     const o=e.originalStartTime?.dateTime||pr.origStart;icon='🔁';
@@ -1364,14 +1367,14 @@ function lessonRow(ev){
   const pr=ev.extendedProperties?.private||{};const st=evState(ev);
   const isB=pr.kind==='booking',isMk=pr.makeup==='1';
   const isPast=new Date(ev.end.dateTime).getTime()<Date.now();
-  let label=(isPast?'已過・':'')+(st==='leave'?'🚫 請假'+(pr.reason?'・'+esc(pr.reason):''):st==='teacherOff'?'⛔ 老師停課':isMk?'補課':pr.logged==='1'?'補登':isB?'約課':'固定課');
+  let label=(isPast?'已過・':'')+(st==='absent'?'🚷 曠課（照常計薪）':st==='leave'?'🚫 請假'+(pr.reason?'・'+esc(pr.reason):''):st==='teacherOff'?'⛔ 老師停課':isMk?'補課':pr.logged==='1'?'補登':isB?'約課':'固定課');
   if(pr.moved==='1'&&!st){
     const o=ev.originalStartTime?.dateTime||pr.origStart;
     label+=(pr.fromOff==='1'?'・停課改期':'・已調課')+(o?`（原 ${fmtMD(evParts(o).date).split(' ')[0]} ${evParts(o).hhmm}）`:'');
   }
   const mv=`<button onclick="openReschedule('${ev.id}')" style="${smallBtn('var(--text2)')}">調課</button>`;
   let btn='';
-  if(st==='leave') btn=`<button onclick="restoreLeave('${ev.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;
+  if(st==='leave'||st==='absent') btn=`<button onclick="restoreLeave('${ev.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;
   else if(st==='teacherOff') btn=`<button onclick="openReschedule('${ev.id}')" style="${smallBtn('var(--text2)')}">調課</button>`;
   else if(isB) btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('var(--red)')}">${isMk?'取消補課':'取消約課'}</button>`;
   else btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('#c8a84a')}">請假</button>`;
@@ -1404,6 +1407,11 @@ function openLeaveReason(ev){
   document.getElementById('lr-title').textContent=`🚫 ${evName(ev)}｜${fmtMD(p.date)} ${p.hhmm} 請假`;
   document.getElementById('lr-text').value='';
   document.getElementById('sheet-lreason').classList.add('show');
+}
+async function saveAbsent(){
+  const ev=lrEv;if(!ev)return;
+  try{await markEvent(ev,'absent');closeSheet('sheet-lreason');weekKey=null;weekCache={};todayKey=null;showToast('✅ 已記為曠課');loadUpcoming(curStudent);}
+  catch(e){showToast('❌ '+e.message);}
 }
 function pickReason(t){document.getElementById('lr-text').value=t;}
 async function saveLeaveReason(){
@@ -1865,6 +1873,10 @@ function parseCommand(text){
     if(!dates.length) return{error:'請加上日期'};
     return{action:'cancel',student:st,date:dates[0].ds};
   }
+  if(/曠課/.test(text)&&!/請假/.test(text)){
+    if(!dates.length) return{error:'請加上日期，例如「小明 10/5 曠課」'};
+    return{action:'absent',student:st,date:dates[0].ds};
+  }
   if(/請假|不來|不能來|沒辦法來|缺席|生病/.test(text)){
     if(!dates.length) return{error:'請加上日期，例如「小明 10/31 請假」'};
     const rm=text.match(/請假\s*[：:，,]?\s*(.+)$/);
@@ -1905,8 +1917,12 @@ async function runCommand(){
       const isB=ev.extendedProperties?.private?.kind==='booking';
       desc=isB?`取消${ev.extendedProperties.private.makeup==='1'?'補課':'約課'}`:'請假'+(c.reason?`（${c.reason}）`:'');
       if(isB) c.action='cancel';
+    }else if(c.action==='absent'){
+      ev=evs.find(e=>!evState(e));
+      if(!ev) return out.innerHTML=cmdMsg(`${s.name} ${day} 沒有課`,true);
+      desc='曠課（照常計薪、不用補課）';
     }else if(c.action==='restore'){
-      ev=evs.find(e=>evState(e)==='leave');
+      ev=evs.find(e=>evState(e)==='leave'||evState(e)==='absent');
       if(!ev) return out.innerHTML=cmdMsg(`${s.name} ${day} 沒有請假紀錄`,true);
       desc='恢復上課';
     }else if(c.action==='cancel'){
@@ -1949,6 +1965,7 @@ async function confirmCommand(){
   try{
     const s=c.student;
     if(c.action==='leave') await markEvent(c.ev,'leave',c.reason);
+    else if(c.action==='absent') await markEvent(c.ev,'absent');
     else if(c.action==='restore') await markEvent(c.ev,'');
     else if(c.action==='cancel'){await gcal('DELETE',`/events/${c.ev.id}`);chDelete(`${c.ev.id}|補課`);}
     else if(c.action==='move'){
@@ -2070,6 +2087,8 @@ async function buildExport(){
         const k=n+'|'+r;(lv[k]=lv[k]||{n,r,d:[]}).d.push(evParts(e.start.dateTime).date);
       });
       Object.values(lv).forEach(({n,r,d})=>{d.sort();lines.push({k:d[0],t:r?`${n} ${d.map(mdShort).join(' ')} ${r}`:(d.length===1?`${n} ${mdShort(d[0])}請假`:`${n} ${d.map(mdShort).join(' ')} 請假`)});});
+      // 曠課
+      lessons.filter(e=>evState(e)==='absent'&&inCh(evParts(e.start.dateTime).date)).forEach(e=>lines.push({k:evParts(e.start.dateTime).date,t:`${shortName(evName(e))} ${mdShort(evParts(e.start.dateTime).date)} 曠課`}));
       // 老師請假
       tLeaves.forEach(e=>{const dd=leaveDays(e).filter(inCh);if(!dd.length)return;const note=e.extendedProperties.private.note;
         lines.push({k:dd[0],t:`老師 ${mdShort(dd[0])}${dd.length>1?'-'+mdShort(dd[dd.length-1]):''} 請假${note?'（'+note+'）':''}`});});
@@ -2477,7 +2496,7 @@ async function renderCheckins(){
       gcal('GET','/events',null,[['timeMin',twISO(first,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
     ]);
     monthChecks=(c&&c.items||[]).filter(e=>e.status!=='cancelled');
-    const lessons=(l&&l.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&!evState(e)&&(e.extendedProperties?.private?.studentId||isSub(e)));
+    const lessons=(l&&l.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&(!evState(e)||evState(e)==='absent')&&(e.extendedProperties?.private?.studentId||isSub(e)));
     const sum={};
     const S=p=>sum[p]=sum[p]||{h:0,days:0,plan:0,planM:0,done:0,doneM:0,planSub:0,doneSub:0};
     monthChecks.forEach(e=>{const x=S(e.extendedProperties?.private?.place||'?');x.h+=(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000;x.days++;});
@@ -2680,7 +2699,7 @@ async function renderSalary(silent){
       querySalary().then(r=>{salaryErr='';return r;}).catch(e=>{salaryErr=e.message;return[];}),
     ]);
     if(!silent) salaryRows=rows;
-    const lessons=lessonsAll.filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&!evState(e)&&(e.extendedProperties?.private?.studentId||isSub(e))&&new Date(e.end.dateTime).getTime()<=Date.now()+0*1);
+    const lessons=lessonsAll.filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&(!evState(e)||evState(e)==='absent')&&(e.extendedProperties?.private?.studentId||isSub(e))&&new Date(e.end.dateTime).getTime()<=Date.now()+0*1);
     const inMonth=e=>{const d=evParts(e.start.dateTime).date;return d>=first&&d<next;};
     const places={};
     const P=p=>places[p]=places[p]||{place:p,lessons:0,subs:0,hours:0,pay:0,extra:[],per4:[]};
@@ -2950,7 +2969,7 @@ async function syncDailyReminder(){
 
 // ══════════ 課程異動同步到 Notion「課程異動」資料庫 ══════════
 const DB_CHANGES='3edd68e58caf80c798d5eb935f177c03'; // 「課程異動」資料庫
-const CH_TYPES={leave:'學生請假',teacherOff:'老師停課'};
+const CH_TYPES={leave:'學生請假',teacherOff:'老師停課',absent:'曠課'};
 async function chUpsert(key,o){
   if(!DB_CHANGES) return;
   try{
@@ -2989,7 +3008,7 @@ async function chLesson(ev,type){
 }
 async function chAfterMark(ev,state){
   if(state) await chLesson(ev,CH_TYPES[state]);
-  else{await chDelete(`${ev.id}|學生請假`);await chDelete(`${ev.id}|老師停課`);}
+  else{await chDelete(`${ev.id}|學生請假`);await chDelete(`${ev.id}|老師停課`);await chDelete(`${ev.id}|曠課`);}
 }
 async function chTeacherLeave(ev){
   if(!ev||!ev.start?.date) return;
@@ -3091,13 +3110,14 @@ const HELP=[
   ['搜尋與篩選','上方搜尋欄可以打名字或暱稱；篩選有各教室、約課制、體驗、暫停／不上課。'],
   ['新增學生','右下「＋ 學生」。排課方式選「每週固定」會自動排進每週課表；「約課制」只有約好才出現。'],
   ['暱稱','可填好幾個，用空格分開。指令框、搜尋、匯出課表都會用暱稱。'],
-  ['近期課程','學生頁列出最近兩週已上過的課（標示「已過」）和接下來 5 堂。每堂可以「調課」「請假」；已經過去的課只能請假或取消，事後才知道學生請假或曠課也能補登。'],
+  ['近期課程','學生頁列出最近一週內已上過的最後一堂（標示「已過」）和接下來 5 堂。每堂可以「調課」「請假」；已經過去的課只能請假或取消，事後才知道學生請假或曠課也能補登。'],
   ['課程異動紀錄','請假、停課、調課、補課，預設顯示前後一個月，可展開全部。'],
   ['上課紀錄','「＋ 新增」寫一堂（上課內容、上課狀況／其他事項）；「匯入」可以一次貼上很多堂（日期一行、內容在下面）；「匯出」整理成給家長看的文字。網址會變成可點的連結。'],
   ['轉為正式學生','體驗課學生頁有「🎉 轉為正式學生」，確認星期和時間後儲存，就會排進每週課表。'],
  ]},
  {t:'🔄 請假與課程異動',items:[
-  ['學生請假','學生頁那堂課按「請假」，可以選理由或留空。不會刪掉課，而是標成請假、留下紀錄，按「恢復」可撤銷。'],
+  ['學生請假','學生頁那堂課按「請假」，可以選理由或留空。不會刪掉課，而是標成請假、留下紀錄，按「恢復」可撤銷。請假不計薪、可以補課。'],
+  ['曠課','在請假視窗按「🚷 記為曠課」：照常計薪、不用補課。如果曠課要算順延（例如初犯），改用「確定請假」並選理由「曠課」。'],
   ['調課','只移動那一堂，之後每週照常。'],
   ['補課','學生頁「＋ 補課」或課表「＋ 加課」。補課會自動抵掉請假，學生頁顯示「請假・已補・待補」。'],
   ['老師請假','首頁「＋ 請假」，選日期和事由。期間的課會變成「⛔ 老師停課」，不算學生請假、不需補課；期間也無法排課。'],
@@ -4010,7 +4030,7 @@ function renderSchedule(){
       box-sizing:border-box;
       ${layered?'box-shadow:-3px 0 6px rgba(0,0,0,0.45);':''}
     ">
-      <div style="font-size:11px;font-weight:700;color:${state?'var(--text3)':layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${state?'text-decoration:line-through;':''}">${state==='leave'?'🚫':state==='teacherOff'?'⛔':isTrial(s)?'🌱':''}${s.name}</div>
+      <div style="font-size:11px;font-weight:700;color:${state?'var(--text3)':layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${state?'text-decoration:line-through;':''}">${state==='leave'?'🚫':state==='teacherOff'?'⛔':state==='absent'?'🚷':isTrial(s)?'🌱':''}${s.name}</div>
       ${heightPx>30?`<div style="font-size:${dayMode?11:9}px;color:var(--text3);line-height:1.3;white-space:nowrap;overflow:hidden;">${norm}${dur!==60?` ${dur}分`:''}${dayMode?`・${esc((s.room||'').replace(' Yamaha',''))}${state==='leave'?'・請假':state==='teacherOff'?'・老師停課':booking?'・約課/補課':''}`:''}</div>`:''}
     </div>`;
   }).join('');
