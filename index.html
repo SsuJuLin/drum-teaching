@@ -769,7 +769,7 @@ async function notionAPI(method,path,body){
     setTimeout(()=>showToast('🔑 Notion 權杖已失效，請輸入新的權杖'),300);
     throw new Error('Notion 權杖已失效');
   }
-  if(!r.ok) throw new Error(`Notion API error: ${r.status}`);
+  if(!r.ok){let m='';try{m=(await r.json()).message||'';}catch(e){}throw new Error(`Notion API error: ${r.status}${m?'・'+m:''}`);}
   return r.json();
 }
 async function queryDB(dbId,filter,sorts){
@@ -957,8 +957,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.06-1';
+const APP_VERSION='2026.10.06-2';
 const CHANGELOG=[
+  {v:'2026.10.06-2',items:['修正：點歌儲存失敗（Notion 400），改成依資料庫實際的欄位類型寫入','Notion 錯誤訊息會顯示詳細原因，方便排查']},
   {v:'2026.10.06-1',items:['學生頁新增「點歌」：顯示兩首、可展開，點歌名直接開 YouTube（沒填連結就搜尋歌名），按「✅ 完成」就收進「已學會」','新增上課紀錄時可以寫「待辦」，一行一項，期限自動設成下一堂課','首頁新增待辦清單，勾選就完成；快到期黃色、過期紅色','今日課程有待辦的學生會標 ☑️']},
   {v:'2026.10.05-1',items:['修正九月薪資：收款名稱或日期跟月份對不上時不會算進去；改成名稱開頭沒有月份就用收到日期往前推一個月','修正：同一個月有獎金又有收款時，收款沒算進應領','獎金、紅包等額外收入算作已收；沒填日期或金額的收款不再顯示 NaN','首頁右上角新增 🔔 最新動態：分「行程」和「上課紀錄」，依時間列出最近的變動','上課紀錄的「上課狀況」和「其他事項」合併成一欄；設定頁可一鍵合併舊紀錄']},
   {v:'2026.10.04-6',items:['泰順按「下班」後 30 分鐘會提醒填時數，23:30 的提醒照舊，按「完成」兩個一起取消','薪資收款可以一個月記很多次，按鈕改名「＋ 記錄收款」，顯示「已收／應領」','藝文每筆「滿四堂」旁邊有自己的「收到了」按鈕','設定頁新增「薪資」區，放薪資紀錄和計薪規則；「說明」移到最下面']},
@@ -3231,8 +3232,50 @@ async function queryAll(db,body){
     const d=await notionAPI('POST',`/databases/${db}/query`,b);out=out.concat(d.results||[]);cursor=d.has_more?d.next_cursor:null;}while(cursor&&++guard<20);
   return out;
 }
+// 依資料庫實際的欄位類型寫入（例如「狀態」可能是單選或 Notion 的狀態欄位、「連結」可能是網址或文字）
+let schemaCache={};
+async function getSchema(db){
+  if(schemaCache[db]) return schemaCache[db];
+  const d=await notionAPI('GET',`/databases/${db}`);
+  schemaCache[db]=d.properties||{};return schemaCache[db];
+}
+const SONG_GROUP={想學:'to_do',練習中:'in_progress',學會了:'complete'};
+function songStatusProp(sc,name){
+  const p=sc['狀態'];if(!p) return {};
+  if(p.type==='status'){
+    const opts=p.status?.options||[],groups=p.status?.groups||[];
+    let o=opts.find(x=>x.name===name);
+    if(!o){const g=groups.find(x=>x.name===SONG_GROUP[name]||x.id===SONG_GROUP[name]);const gid=g?.option_ids?.[0];o=opts.find(x=>x.id===gid)||opts[name==='學會了'?opts.length-1:name==='練習中'?Math.min(1,opts.length-1):0];}
+    return o?{'狀態':{status:{name:o.name}}}:{};
+  }
+  if(p.type==='select') return {'狀態':{select:{name}}};
+  return {};
+}
+function songStatusRead(sc,page){
+  const v=page.properties?.['狀態'];if(!v) return '想學';
+  if(v.type==='select') return v.select?.name||'想學';
+  if(v.type==='status'){
+    const nm=v.status?.name||'';if(SONG_GROUP[nm]) return nm;
+    const opt=v.status?.id;const groups=sc['狀態']?.status?.groups||[];
+    const g=groups.find(x=>(x.option_ids||[]).includes(opt));
+    return g?({complete:'學會了',in_progress:'練習中'}[g.name]||'想學'):'想學';
+  }
+  return '想學';
+}
+function textOrUrlProp(sc,key,val){
+  const t=sc[key]?.type;if(!t) return {};
+  if(t==='url') return {[key]:{url:val||null}};
+  if(t==='rich_text') return {[key]:{rich_text:val?[{text:{content:val}}]:[]}};
+  return {};
+}
+function readTextOrUrl(page,key){const v=page.properties?.[key];if(!v) return '';return v.type==='url'?(v.url||''):(v.rich_text||[]).map(x=>x.plain_text).join('');}
+function titleKey(sc,fallback){return Object.keys(sc).find(k=>sc[k].type==='title')||fallback;}
 async function loadSongs(){
-  try{songs=(await queryAll(DB_SONGS,{sorts:[{property:'點歌日',direction:'descending'}]})).map(p=>({id:p.id,name:gp(p,'歌名','title'),sid:gp(p,'學生','relation'),url:p.properties?.['連結']?.url||'',status:gp(p,'狀態','select')||'想學',date:gp(p,'點歌日','date')||''}));}
+  try{
+    const sc=await getSchema(DB_SONGS);const tk=titleKey(sc,'歌名');
+    const pages=await queryAll(DB_SONGS,sc['點歌日']?{sorts:[{property:'點歌日',direction:'descending'}]}:{});
+    songs=pages.map(p=>({id:p.id,name:gp(p,tk,'title'),sid:gp(p,'學生','relation'),url:readTextOrUrl(p,'連結'),status:songStatusRead(sc,p),date:gp(p,'點歌日','date')||''}));
+  }
   catch(e){console.warn('songs',e.message);songs=[];}
 }
 function songLink(sg){return sg.url||('https://www.youtube.com/results?search_query='+encodeURIComponent(sg.name));}
@@ -3265,10 +3308,11 @@ function openSong(sid,songId){
 async function saveSong(){
   const name=document.getElementById('song-name').value.trim();const url=document.getElementById('song-url').value.trim();
   if(!name){showToast('請輸入歌名');return;}
-  const props={'歌名':{title:[{text:{content:name}}]},'連結':{url:url||null}};
   try{
+    const sc=await getSchema(DB_SONGS);const tk=titleKey(sc,'歌名');
+    const props={[tk]:{title:[{text:{content:name}}]},...textOrUrlProp(sc,'連結',url)};
     if(songCtx.id) await notionAPI('PATCH',`/pages/${songCtx.id}`,{properties:props});
-    else await notionAPI('POST','/pages',{parent:{database_id:DB_SONGS},properties:{...props,'學生':{relation:[{id:songCtx.sid}]},'狀態':{select:{name:'想學'}},'點歌日':{date:{start:twToday()}}}});
+    else await notionAPI('POST','/pages',{parent:{database_id:DB_SONGS},properties:{...props,...(sc['學生']?{'學生':{relation:[{id:songCtx.sid}]}}:{}),...songStatusProp(sc,'想學'),...(sc['點歌日']?.type==='date'?{'點歌日':{date:{start:twToday()}}}:{})}});
     closeSheet('sheet-song');showToast('✅ 已儲存點歌');await loadSongs();if(curPage==='detail')renderDetail(songCtx.sid);
   }catch(e){showToast('❌ '+e.message);}
 }
@@ -3281,13 +3325,14 @@ function deleteSong(){
 async function setSongStatus(id,st){
   const sg=songs.find(x=>x.id===id);if(!sg)return;
   const old=sg.status;sg.status=st;if(curPage==='detail')renderDetail(sg.sid);
-  try{await notionAPI('PATCH',`/pages/${id}`,{properties:{'狀態':{select:{name:st}}}});if(st==='學會了')showToast(`🎉 ${sg.name} 學會了`);}
+  try{const sc=await getSchema(DB_SONGS);await notionAPI('PATCH',`/pages/${id}`,{properties:songStatusProp(sc,st)});if(st==='學會了')showToast(`🎉 ${sg.name} 學會了`);}
   catch(e){sg.status=old;showToast('❌ '+e.message);if(curPage==='detail')renderDetail(sg.sid);}
 }
 
 // ══════════ 待辦 ══════════
 async function loadTodos(){
-  try{todos=(await queryAll(DB_TODOS,{filter:{property:'完成',checkbox:{equals:false}}})).map(p=>({id:p.id,text:gp(p,'內容','title'),sid:gp(p,'學生','relation'),due:gp(p,'期限','date')||''}));}
+  try{const sc=await getSchema(DB_TODOS);const tk=titleKey(sc,'內容');
+    todos=(await queryAll(DB_TODOS,{filter:{property:'完成',checkbox:{equals:false}}})).map(p=>({id:p.id,text:gp(p,tk,'title'),sid:gp(p,'學生','relation'),due:gp(p,'期限','date')||''}));}
   catch(e){console.warn('todos',e.message);todos=[];}
 }
 async function nextLessonDate(sid,afterDate){
@@ -3301,7 +3346,7 @@ async function createTodos(sid,lines,fromDate){
   if(!lines.length) return;
   const due=await nextLessonDate(sid,fromDate||twToday());
   for(const t of lines){
-    try{await notionAPI('POST','/pages',{parent:{database_id:DB_TODOS},properties:{'內容':{title:[{text:{content:t.slice(0,200)}}]},'學生':{relation:[{id:sid}]},'完成':{checkbox:false},...(due?{'期限':{date:{start:due}}}:{})}});}catch(e){console.warn(e);}
+    try{const sc=await getSchema(DB_TODOS);await notionAPI('POST','/pages',{parent:{database_id:DB_TODOS},properties:{[titleKey(sc,'內容')]:{title:[{text:{content:t.slice(0,200)}}]},'學生':{relation:[{id:sid}]},'完成':{checkbox:false},...(due?{'期限':{date:{start:due}}}:{})}});}catch(e){console.warn(e);}
   }
   await loadTodos();
 }
