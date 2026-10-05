@@ -965,8 +965,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.06-5';
+const APP_VERSION='2026.10.06-6';
 const CHANGELOG=[
+  {v:'2026.10.06-6',items:['近期課程裡已經過去的那堂課改成暗色顯示，跟請假的課一樣']},
   {v:'2026.10.06-5',items:['近期課程只顯示最近一週內、已過去的最後一堂','新增「曠課」：照常計薪、不用補課，課表和紀錄以 🚷 標示','曠課初犯要順延的話，用「請假」並選理由「曠課」，就不計薪、可補課','指令框：「小明 10/5 曠課」記為曠課；「小明 10/5 請假 曠課」則是請假']},
   {v:'2026.10.06-4',items:['最新動態的 🔔 移到首頁上方標題列右邊','首頁標題改成「阿森Asen🥁｜工作&鼓教學系統」','學生頁「近期課程」也會顯示已經過去的課，事後才想到要登記請假或曠課也能處理','請假理由新增「曠課」']},
   {v:'2026.10.06-3',items:['修正：上課紀錄超過 100 筆時，較舊的紀錄讀不到（匯入後看不到、星星累積少算）','設定頁新增「清除重複的上課紀錄」，處理重複匯入產生的紀錄']},
@@ -1380,7 +1381,7 @@ function lessonRow(ev){
   else btn=mv+`<button onclick="cancelLesson('${ev.id}')" style="${smallBtn('#c8a84a')}">請假</button>`;
   if(isPast) btn=btn.replace(mv,'');
   btn=btn?`<div style="display:flex;gap:6px;flex-shrink:0;">${btn}</div>`:'';
-  return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;${st?'opacity:0.6;':''}">
+  return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;${st||isPast?'opacity:0.6;':''}">
     <div style="flex:1;min-width:0;">
       <div style="font-size:14px;font-weight:700;color:var(--text);${st?'text-decoration:line-through;':''}">${fmtMD(p.date)}</div>
       <div style="font-size:11px;color:var(--text3);">${p.hhmm}${dur!==60?' · '+dur+'分':''} · ${label}</div>
