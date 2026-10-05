@@ -246,7 +246,8 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     <div class="page active" id="page-home">
       <div id="gcal-banner"></div>
       <div id="update-banner"></div>
-      <div class="dash-hero">
+      <div class="dash-hero" style="position:relative;">
+        <button onclick="showPage('feed')" aria-label="最新動態" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--text2);cursor:pointer;padding:4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg></button>
         <div class="hero-drum"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" style="color:var(--accent)"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="40.5" y1="9" x2="40.5" y2="28"/><g transform="rotate(-12 40.5 8.5)"><ellipse cx="40.5" cy="8.5" rx="6.5" ry="1.3"/><path d="M39 7.4 Q40.5 5.6 42 7.4"/></g><line x1="8" y1="13.5" x2="8" y2="42"/><ellipse cx="8" cy="11" rx="5.8" ry="1.1"/><path d="M6.7 10 Q8 8.6 9.3 10"/><ellipse cx="8" cy="13.6" rx="5.8" ry="1.1"/><path d="M17.2 15.5 A3.6 3.6 0 1 1 23.6 12.4 Q25 12.1 26.4 12.4 A3.6 3.6 0 1 1 32.8 15.5 Q35 20 31 27 L19 27 Q15 20 17.2 15.5 Z" fill="#0c180c"/><circle cx="20.6" cy="12.6" r="0.9" fill="currentColor" stroke="none"/><circle cx="29.4" cy="12.6" r="0.9" fill="currentColor" stroke="none"/><path d="M22.4 18.3 Q25 20 27.6 18.3"/><circle cx="25" cy="33" r="9.5" fill="#0c180c"/><circle cx="25" cy="33" r="3.2" stroke-width="1.2"/><line x1="18.2" y1="41.5" x2="16.5" y2="44.5"/><line x1="31.8" y1="41.5" x2="33.5" y2="44.5"/><ellipse cx="10" cy="27" rx="6" ry="1.9" fill="#0c180c"/><path d="M4 27 V30.5 A6 1.9 0 0 0 16 30.5 V27" fill="#0c180c"/><line x1="7" y1="32.3" x2="5" y2="42"/><line x1="13" y1="32.3" x2="15" y2="42"/><ellipse cx="41" cy="29" rx="5.5" ry="1.9" fill="#0c180c"/><path d="M35.5 29 V37 A5.5 1.9 0 0 0 46.5 37 V29" fill="#0c180c"/><line x1="37" y1="38.7" x2="36.6" y2="44"/><line x1="45" y1="38.7" x2="45.4" y2="44"/></g></svg></div>
         <div class="hero-text">
           <div class="ht1">阿森Asen｜工作&爵士鼓教學系統</div>
@@ -267,6 +268,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
     </div>
     <div class="page" id="page-settings">
       <div style="padding:4px 16px 24px;" id="settings-wrap"></div>
+    </div>
+    <div class="page" id="page-feed">
+      <button class="back-bar" onclick="goBack('home')">‹ 返回</button>
+      <div style="padding:0 16px 24px;" id="feed-wrap"></div>
     </div>
     <div class="page" id="page-help">
       <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
@@ -353,8 +358,8 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
         <div class="form-group"><label class="form-label">時間</label><input class="form-input" type="time" id="rec-time"></div>
       </div>
       <div class="form-group"><label class="form-label">上課內容</label><textarea class="form-textarea" id="rec-content" placeholder="練習內容、曲目…"></textarea></div>
-      <div class="form-group"><label class="form-label">上課狀況</label><textarea class="form-textarea" id="rec-status" placeholder="今天表現…"></textarea></div>
-      <div class="form-group"><label class="form-label">其他事項</label><input class="form-input" id="rec-note" placeholder="未印譜、點歌…"></div>
+      <div class="form-group"><label class="form-label">上課狀況／其他事項</label><textarea class="form-textarea" id="rec-status" placeholder="今天表現、其他備註…"></textarea></div>
+      <input type="hidden" id="rec-note">
       <div class="form-group">
         <label class="form-label">⭐ 超級讚</label>
         <div class="star-picker" id="star-picker">
@@ -933,8 +938,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.04-6';
+const APP_VERSION='2026.10.05-1';
 const CHANGELOG=[
+  {v:'2026.10.05-1',items:['修正九月薪資：收款名稱或日期跟月份對不上時不會算進去；改成名稱開頭沒有月份就用收到日期往前推一個月','修正：同一個月有獎金又有收款時，收款沒算進應領','獎金、紅包等額外收入算作已收；沒填日期或金額的收款不再顯示 NaN','首頁右上角新增 🔔 最新動態：分「行程」和「上課紀錄」，依時間列出最近的變動','上課紀錄的「上課狀況」和「其他事項」合併成一欄；設定頁可一鍵合併舊紀錄']},
   {v:'2026.10.04-6',items:['泰順按「下班」後 30 分鐘會提醒填時數，23:30 的提醒照舊，按「完成」兩個一起取消','薪資收款可以一個月記很多次，按鈕改名「＋ 記錄收款」，顯示「已收／應領」','藝文每筆「滿四堂」旁邊有自己的「收到了」按鈕','設定頁新增「薪資」區，放薪資紀錄和計薪規則；「說明」移到最下面']},
   {v:'2026.10.04-5',items:['課表新增「Week／Day」切換，Day 模式只看一天，顯示教室和狀態','設定頁新增「操作教學」，依功能分類、可搜尋，之後每次更新會一起修改']},
   {v:'2026.10.04-4',items:['學生新增「體驗」狀態：用加課排體驗課、照教室時薪計薪、學生頁可一鍵轉為正式學生','學生列表多一個「體驗」篩選，課表和今日課程以 🌱 標示','修正：老師請假期間，新學生或改時間學生的課不會自動停課；現在會自動補標，請假紀錄頁也有「重新套用」']},
@@ -2214,7 +2220,7 @@ function unrecHtml(){
       }else{
         const f=(l,v)=>v?`<div style="margin-bottom:6px;font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;">${l?`<span style="color:var(--text3);">${l}：</span>`:''}${linkify(v)}</div>`:'';
         detail=`<div style="padding:2px 0 10px 50px;" onclick="event.stopPropagation()">
-          ${last?`${f('',last.content)}${f('狀況',last.status)}${f('其他',last.note)}`:'<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">還沒有上課紀錄</div>'}
+          ${last?`${f('',last.content)}${f('狀況',[last.status,last.note].filter(Boolean).join('\n'))}`:'<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">還沒有上課紀錄</div>'}
           ${rec?`<button class="add-rec-btn" onclick="editRecord('${rec.id}')">查看今天的紀錄</button>`
             :`<button class="add-rec-btn" onclick="recordFromToday('${sid}','${p.hhmm}','${td}',true)">＋ 新增紀錄${last&&last.content?'（帶入上次內容）':''}</button>`}
         </div>`;
@@ -2486,6 +2492,17 @@ async function gcalAll(query,cal){
   }while(token&&++guard<20);
   return items;
 }
+function salaryMonthOf(r){
+  const m=(r.name||'').match(/^(\d{4})\s*[\/\-年.]\s*(\d{1,2})(?!\d)/);
+  if(r.type==='入帳'){
+    if(m) return `${m[1]}/${m[2].padStart(2,'0')}`;
+    if(r.date){const d=new Date(r.date.slice(0,10)+'T00:00:00Z');d.setUTCMonth(d.getUTCMonth()-1);return `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}`;}
+    return null;
+  }
+  if(r.date) return r.date.slice(0,7).replace('-','/');
+  if(m) return `${m[1]}/${m[2].padStart(2,'0')}`;
+  return null;
+}
 async function querySalary(){
   if(!DB_SALARY) return [];
   let out=[],cursor=null,guard=0;
@@ -2575,9 +2592,7 @@ async function renderSalaryYears(){
     const cols=['楊梅宏音 Yamaha','內壢奧莉琪','林口星玥','藝文鹿納','泰順錄音室','其他'];
     const data={};
     rows.forEach(r=>{
-      let mk=null;
-      if(r.type==='入帳'){const m=(r.name||'').match(/^(\d{4})\/(\d{2})/);if(m)mk=`${m[1]}/${m[2]}`;}
-      else if(r.type&&r.date) mk=r.date.slice(0,7).replace('-','/');
+      const mk=r.type?salaryMonthOf(r):null;
       if(!mk) return;
       const pl=cols.includes(r.place)?r.place:'其他';
       (data[mk]=data[mk]||{})[pl]=(data[mk][pl]||0)+(r.amount||0);
@@ -2666,24 +2681,25 @@ async function renderSalary(silent){
       });
       if(x.per4.length||x.pay) places[per4Place]=x;
     }
-    // Notion：獎金、錄音案子、其他收入（依日期歸月）
-    rows.filter(r=>r.type&&r.type!=='入帳'&&r.date&&r.date>=first&&r.date<next).forEach(r=>{const x=P(r.place||'其他');x.pay+=r.amount||0;x.extra.push(r);});
-    // 沒有課程資料的舊月份：用入帳金額當作應領（歷史紀錄）
-    rows.filter(r=>r.type==='入帳'&&(r.name||'').startsWith(mk)&&r.place).forEach(r=>{
-      const x=places[r.place];
-      if(!x){const y2=P(r.place);y2.hist=true;y2.pay+=r.amount||0;}
-      else if(x.hist) x.pay+=r.amount||0;
+    // Notion：獎金、錄音案子、其他收入（依月份歸屬；這些都是已經收到的錢）
+    rows.filter(r=>r.type&&r.type!=='入帳'&&salaryMonthOf(r)===mk).forEach(r=>{const x=P(r.place||'其他');x.pay+=r.amount||0;x.extra.push(r);});
+    // 收款：名稱開頭的月份，沒有的話用收到日期往前推一個月
+    const paidRows=rows.filter(r=>r.type==='入帳'&&salaryMonthOf(r)===mk);
+    // 這個地點這個月沒有任何課程資料（舊月份）→ 用收款金額當作應領
+    paidRows.filter(r=>r.place).forEach(r=>{
+      const x=P(r.place);
+      if(x.hist===undefined) x.hist=!(x.lessons||x.subs||x.per4.some(p=>!p.progress));
+      if(x.hist) x.pay+=r.amount||0;
     });
     const order=[...rulePlaces(),'其他'];
     const list=Object.values(places).sort((a,b)=>order.indexOf(a.place)-order.indexOf(b.place));
     const total=list.reduce((a,x)=>a+x.pay,0);
-    const paidRows=rows.filter(r=>r.type==='入帳'&&(r.name||'').startsWith(mk));
-    const paidTotal=paidRows.reduce((a,r)=>a+(r.amount||0),0);
+    const paidTotal=paidRows.reduce((a,r)=>a+(r.amount||0),0)+list.reduce((a,x)=>a+x.extra.reduce((b,r)=>b+(r.amount||0),0),0);
     const money=n=>'$'+Math.round(n).toLocaleString();
     let html=`<div class="rec-card" style="padding:14px;margin-bottom:14px;">
       <div style="font-size:12px;color:var(--text3);">應領合計${sOff===0?'（只算已上完的課）':''}</div>
       <div style="font-size:26px;font-weight:900;color:var(--accent);margin:2px 0;">${money(total)}</div>
-      <div style="font-size:12px;color:var(--text3);">已入帳 ${money(paidTotal)}${total-paidTotal>0?`・未入帳 ${money(total-paidTotal)}`:''}</div>
+      <div style="font-size:12px;color:var(--text3);">已收 ${money(paidTotal)}${total-paidTotal>0?`・還沒收 ${money(total-paidTotal)}`:''}</div>
       ${salaryErr?`<div style="font-size:11px;color:var(--red);margin-top:8px;">讀不到 Notion「薪資紀錄」資料庫（${esc(salaryErr)}），請確認資料庫已「連接」爵士鼓教學系統</div>`:''}
       ${DB_SALARY&&!salaryErr?`<button class="add-rec-btn" style="margin-top:10px;" onclick="openIncome()">＋ 獎金／錄音案子／其他</button>`:`<div style="font-size:11px;color:#c8a84a;margin-top:8px;">尚未連接 Notion「薪資紀錄」資料庫，入帳與額外收入暫時無法記錄</div>`}
     </div>`;
@@ -2691,9 +2707,9 @@ async function renderSalary(silent){
     if(!list.length) html+=`<div class="rec-empty">這個月沒有收入紀錄</div>`;
     list.forEach(x=>{
       const rule=ruleFor(x.place,addDays(next,-1))||{};
-      const paid=paidRows.filter(r=>r.place===x.place).reduce((a,r)=>a+(r.amount||0),0);
+      const paid=paidRows.filter(r=>r.place===x.place).reduce((a,r)=>a+(r.amount||0),0)+x.extra.reduce((a,r)=>a+(r.amount||0),0);
       const prs=paidRows.filter(r=>r.place===x.place).sort((a,b)=>(a.date||'')<(b.date||'')?-1:1);
-      const paidR=prs[0];
+      const paidR=prs[0]||(x.extra.length?x.extra[0]:null);
       const due=rule.payDay?`預計 ${ny}/${nm}/${rule.payDay} 發薪`:rule.per4?'每位學生滿四堂發':'手動';
       const diff=paidR?paid-x.pay:0;
       html+=`<div class="rec-card" style="padding:12px;margin-bottom:10px;">
@@ -2715,7 +2731,7 @@ async function renderSalary(silent){
             <div style="flex:1;font-size:12px;color:${paidR?(diff>=0?'var(--accent)':'#c8a84a'):'var(--text3)'};">${paidR?`已收 ${money(paid)}／應領 ${money(x.pay)}${diff<0?`・還差 ${money(-diff)}`:diff>0?`・多 ${money(diff)}`:''}`:'未收款'}</div>
             ${DB_SALARY&&!x.hist&&!(rule.per4)?`<button class="add-rec-btn" style="padding:5px 10px;font-size:12px;" onclick="openPaid('${x.place}',${Math.max(0,x.pay-paid)},'${mk}')">＋ 記錄收款</button>`:''}
           </div>
-          ${prs.map(r=>`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text3);padding:3px 0;"><div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">💵 ${mdShort(r.date||'')} 收 ${money(r.amount||0)}${r.note?'・'+esc(r.note):''}</div>${DB_SALARY?`<button style="${smallBtn('var(--text3)')}padding:2px 8px;" onclick="openPaid('${x.place}',${x.pay},'${mk}','${r.id}')">改</button>`:''}</div>`).join('')}
+          ${prs.map(r=>`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text3);padding:3px 0;"><div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">💵 ${r.date?mdShort(r.date):'未填日期'} 收 ${r.amount?money(r.amount):'未填金額'}${r.note?'・'+esc(r.note):''}</div>${DB_SALARY?`<button style="${smallBtn('var(--text3)')}padding:2px 8px;" onclick="openPaid('${x.place}',${x.pay},'${mk}','${r.id}')">改</button>`:''}</div>`).join('')}
         </div></div>`;
     });
     wrap.innerHTML=head+html;
@@ -3019,6 +3035,11 @@ const HELP=[
   ['重新整理','點底部的首頁圖示，會重新抓取 Notion 和日曆的最新資料。'],
   ['＋ 請假','右下角按鈕是「老師請假」，學生請假要到學生頁或用指令框。'],
  ]},
+ {t:'🔔 最新動態',items:[
+  ['在哪裡','首頁標題卡右上角的鈴鐺。'],
+  ['行程','最近的請假、停課、調課、補課、代課、老師請假和新增學生，依時間排列。'],
+  ['上課紀錄','最近新增或修改的上課紀錄，點了直接打開那篇。'],
+ ]},
  {t:'📅 課表',items:[
   ['切換週／日','右上「Week」切換成「Day」只看一天，再按切回整週。左右滑動或按 ‹ › 換到上一週／下一週（Day 模式是前一天／後一天）。'],
   ['紅線','今天現在的時間，進入課表會自動捲到紅線附近。'],
@@ -3033,7 +3054,7 @@ const HELP=[
   ['暱稱','可填好幾個，用空格分開。指令框、搜尋、匯出課表都會用暱稱。'],
   ['近期課程','學生頁列出接下來 5 堂，每堂可以「調課」「請假」；約課、補課則是「調課」「取消」。'],
   ['課程異動紀錄','請假、停課、調課、補課，預設顯示前後一個月，可展開全部。'],
-  ['上課紀錄','「＋ 新增」寫一堂；「匯入」可以一次貼上很多堂（日期一行、內容在下面）；「匯出」整理成給家長看的文字。網址會變成可點的連結。'],
+  ['上課紀錄','「＋ 新增」寫一堂（上課內容、上課狀況／其他事項）；「匯入」可以一次貼上很多堂（日期一行、內容在下面）；「匯出」整理成給家長看的文字。網址會變成可點的連結。'],
   ['轉為正式學生','體驗課學生頁有「🎉 轉為正式學生」，確認星期和時間後儲存，就會排進每週課表。'],
  ]},
  {t:'🔄 請假與課程異動',items:[
@@ -3106,6 +3127,72 @@ function renderHelpBody(){
     <summary style="padding:12px 14px;font-size:15px;font-weight:700;color:var(--text);cursor:pointer;list-style:none;">${sec.t}<span style="float:right;color:var(--text3);font-size:12px;font-weight:400;">${sec.items.length} 項</span></summary>
     <div style="padding:0 14px 10px;">${sec.items.map(([a,b])=>`<div style="padding:8px 0;border-top:1px solid var(--border);"><div style="font-size:13px;font-weight:700;color:var(--accent);">${esc(a)}</div><div style="font-size:13px;color:var(--text2);line-height:1.6;margin-top:2px;">${esc(b)}</div></div>`).join('')}</div>
   </details>`).join('')||`<div class="rec-empty">找不到相關說明</div>`;
+}
+
+// ══════════ 最新動態（行程／上課紀錄）══════════
+let feedTab='sched';
+function setFeedTab(t){feedTab=t;renderFeed();}
+function feedDayLabel(iso){
+  const p=evParts(iso);const td=twToday();
+  return p.date===td?'今天':p.date===addDays(td,-1)?'昨天':fmtMD(p.date);
+}
+async function renderFeed(){
+  const wrap=document.getElementById('feed-wrap');
+  const tabs=`<div class="filter-scroll" style="padding:0 0 12px;">
+    <div class="chip${feedTab==='sched'?' active':''}" onclick="setFeedTab('sched')">行程</div>
+    <div class="chip${feedTab==='rec'?' active':''}" onclick="setFeedTab('rec')">上課紀錄</div></div>`;
+  wrap.innerHTML=tabs+`<div class="rec-empty">讀取中…</div>`;
+  const tab=feedTab;
+  try{
+    let items=[];
+    if(tab==='sched'){
+      const qs=[];
+      if(DB_CHANGES) qs.push(notionAPI('POST',`/databases/${DB_CHANGES}/query`,{sorts:[{timestamp:'created_time',direction:'descending'}],page_size:60}).then(d=>(d.results||[]).map(p=>{
+        const type=gp(p,'類型','select');const icon={學生請假:'🚫',老師停課:'⛔',老師請假:'🏖',調課:'🔁',補課:'➕',代課:'🔁'}[type]||'•';
+        const note=gp(p,'說明','rich_text');
+        return{at:p.created_time,icon,title:gp(p,'名稱','title'),sub:note,click:null};
+      })).catch(()=>[]));
+      qs.push(notionAPI('POST',`/databases/${DB_STUDENTS}/query`,{sorts:[{timestamp:'created_time',direction:'descending'}],page_size:20}).then(d=>(d.results||[]).map(p=>({at:p.created_time,icon:'👤',title:`新增學生 ${gp(p,'學生','title')}`,sub:gp(p,'教室','select')||'',click:`openDetail('${p.id}','feed')`}))).catch(()=>[]));
+      items=(await Promise.all(qs)).flat();
+    }else{
+      const d=await notionAPI('POST',`/databases/${DB_RECORDS}/query`,{sorts:[{timestamp:'last_edited_time',direction:'descending'}],page_size:50});
+      items=(d.results||[]).map(p=>{
+        const sid=gp(p,'學生','relation');const st=students.find(x=>x.id===sid);
+        const date=gp(p,'日期','date');const content=gp(p,'上課內容紀錄','rich_text')||'';
+        const created=Math.abs(new Date(p.last_edited_time)-new Date(p.created_time))<120000;
+        return{at:p.last_edited_time,icon:created?'📝':'✏️',title:`${st?st.name:''}・${date?fmtMD(date):''}`,sub:(created?'新增・':'修改・')+(content.split('\n')[0]||'（沒有內容）'),click:`editRecord('${p.id}')`};
+      });
+    }
+    items=items.filter(it=>it.at&&!isNaN(new Date(it.at)));
+    items.sort((a,b)=>a.at<b.at?1:-1);
+    if(feedTab!==tab||curPage!=='feed') return;
+    let html='',cur='';
+    items.forEach(it=>{
+      const lab=feedDayLabel(it.at);
+      if(lab!==cur){cur=lab;html+=`<div style="font-size:11px;font-weight:700;color:var(--text3);padding:6px 0;margin:6px 0 6px;border-bottom:1px solid var(--border);">${lab}</div>`;}
+      html+=`<div ${it.click?`onclick="${it.click}"`:''} style="display:flex;gap:10px;padding:8px 2px;${it.click?'cursor:pointer;':''}">
+        <div style="width:38px;flex-shrink:0;font-size:11px;color:var(--text3);padding-top:2px;">${evParts(it.at).hhmm}</div>
+        <div style="font-size:16px;">${it.icon}</div>
+        <div style="flex:1;min-width:0;"><div style="font-size:13px;color:var(--text);">${esc(it.title)}</div>${it.sub?`<div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.sub)}</div>`:''}</div></div>`;
+    });
+    wrap.innerHTML=tabs+(html||`<div class="rec-empty">還沒有動態</div>`);
+  }catch(e){wrap.innerHTML=tabs+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
+}
+// ══════════ 合併舊紀錄：其他事項 → 上課狀況／其他事項 ══════════
+let mergeBusy=false;
+async function mergeOldNotes(){
+  if(mergeBusy) return;
+  const todo=records.filter(r=>(r.note||'').trim());
+  if(!todo.length){showToast('沒有需要合併的紀錄');return;}
+  showConfirm('合併舊紀錄',`共 ${todo.length} 筆紀錄有「其他事項」，會合併到「上課狀況／其他事項」，原本的其他事項欄位會清空。`,async()=>{
+    mergeBusy=true;let ok=0;
+    for(let i=0;i<todo.length;i++){
+      const r=todo[i];showToast(`合併中 ${i+1}/${todo.length}`);
+      const merged=[(r.status||'').trim(),(r.note||'').trim()].filter(Boolean).join('\n');
+      try{await notionAPI('PATCH',`/pages/${r.id}`,{properties:{'上課狀況':{rich_text:[{text:{content:merged.slice(0,1900)}}]},'其他事項':{rich_text:[]}}});ok++;}catch(e){console.warn(e);}
+    }
+    mergeBusy=false;await loadRecords();showToast(`✅ 已合併 ${ok} 筆`);if(curPage==='settings')renderSettings();
+  },'合併');
 }
 
 function renderChangelog(){
@@ -3277,7 +3364,8 @@ function renderSettings(){
       g?`<div style="display:flex;gap:6px;">${gRT?'':`<button class="add-rec-btn" onclick="gcalConnect()">啟用長期登入</button>`}<button id="sync-all-btn" style="${smallBtn('var(--text2)')}" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'同步全部'}</button></div>`:`<button class="add-rec-btn" onclick="gcalConnect()">連接</button>`)+
     setRow('📤','打卡同步到 Notion','把本月打卡補進 Notion',null,`<button style="${smallBtn('var(--text2)')}" onclick="settingsSyncChecks()">${ckSyncText||'同步本月'}</button>`)+
     setRow('📤','課程異動同步到 Notion','請假、停課、調課、補課、代課',null,`<button id="ch-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncChangesToNotion()">${chSyncText||'全部同步'}</button>`)+
-    setRow('🔑','更換 Notion 權杖','權杖重新產生後使用','changeToken()'));
+    setRow('🔑','更換 Notion 權杖','權杖重新產生後使用','changeToken()')+
+    (records.some(r=>(r.note||'').trim())?setRow('🔀','合併舊紀錄的其他事項',`${records.filter(r=>(r.note||'').trim()).length} 筆紀錄還分開存`,null,`<button style="${smallBtn('var(--text2)')}" onclick="mergeOldNotes()">合併</button>`):''));
   h+=setGroup('說明',
     setRow('📖','操作教學','每個功能怎麼用，可搜尋',"showPage('help')"));
   h+=`<div style="text-align:center;font-size:11px;color:var(--text3);margin:24px 0 8px;">阿森Asen｜工作&爵士鼓教學系統<br><span style="cursor:pointer;text-decoration:underline dotted;" onclick="showPage('changelog')">版本 ${APP_VERSION}・更新日誌</span></div>`;
@@ -3497,7 +3585,7 @@ function showPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
-  const titles={help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
+  const titles={feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
@@ -3514,6 +3602,7 @@ function showPage(id){
   if(id==='subs') renderSubs();
   if(id==='changelog') renderChangelog();
   if(id==='rules') renderRules();
+  if(id==='feed') renderFeed();
   if(id==='help'){helpQuery='';document.getElementById('help-wrap').innerHTML='';renderHelp();}
   if(id==='rooms') renderHome();
   if(id==='schedule'){renderSchedule();if(!navFromPop){window.scrollTo(0,0);scheduleScrollPending=true;requestAnimationFrame(()=>requestAnimationFrame(scrollScheduleToNow));}}
@@ -3898,8 +3987,7 @@ function renderDetail(id){
         </div>
         <div class="rec-body">
           ${r.content?`<div class="rec-field"><div class="rf-label">內容</div><div class="rf-val" style="white-space:pre-wrap;">${linkify(r.content)}</div></div>`:''}
-          ${r.status?`<div class="rec-field"><div class="rf-label">狀況</div><div class="rf-val" style="white-space:pre-wrap;">${linkify(r.status)}</div></div>`:''}
-          ${r.note?`<div class="rec-field"><div class="rf-label">其他</div><div class="rf-val" style="white-space:pre-wrap;">${linkify(r.note)}</div></div>`:''}
+          ${(r.status||r.note)?`<div class="rec-field"><div class="rf-label">狀況／其他</div><div class="rf-val" style="white-space:pre-wrap;">${linkify([r.status,r.note].filter(Boolean).join('\n'))}</div></div>`:''}
         </div>
       </div>`).join('')
     }</div>`;
@@ -4020,8 +4108,8 @@ function editRecord(id){
   document.getElementById('rec-date').value=r.date||todayStr();
   document.getElementById('rec-time').value=r.time||'';
   document.getElementById('rec-content').value=r.content||'';
-  document.getElementById('rec-status').value=r.status||'';
-  document.getElementById('rec-note').value=r.note||'';
+  document.getElementById('rec-status').value=[(r.status||'').trim(),(r.note||'').trim()].filter(Boolean).join('\n');
+  document.getElementById('rec-note').value='';
   pickStar(r.stars||0);
   document.getElementById('sheet-record').classList.add('show');
 }
