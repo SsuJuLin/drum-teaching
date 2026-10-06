@@ -988,8 +988,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-2';
+const APP_VERSION='2026.10.07-3';
 const CHANGELOG=[
+  {v:'2026.10.07-3',items:['泰順H14 排班連動：讀取老闆的行事曆，只認標題「林似儒」或「阿森」的行程（只讀不寫）','課表、今日課程、匯出課表都會顯示泰順H14 的班','有班的日子，人在泰順附近會自動打卡，下班時間自動帶入表定時間，不用按下班；有班沒打卡會提醒']},
   {v:'2026.10.07-2',items:['可以自己新增待辦：首頁待辦區和學生頁的「＋」，或指令框「小明 待辦 印譜」','新增個人待辦（不屬於學生），例如「待辦 買鼓棒 10/10」','選了學生，期限會自動設成他的下一堂課']},
   {v:'2026.10.07-1',items:['最新動態新增「打卡」分頁，列出最近一個月的打卡','修正：當天上課紀錄都寫完了，晚上的填紀錄提醒有時沒有取消','泰順時數提醒改成依打卡的下班時間（表定或按下班後）＋30 分鐘，不需要按「下班」也會提醒']},
   {v:'2026.10.06-7',items:['首頁標題卡放大，標題和日期字體加大','修正：匯出課表的日期和天數欄位在手機上重疊（所有表單的並排欄位一起修正）','修正：匯出課表時空堂的時間格式跟其他時段不一致（例如 11-12 後面變成 1200-1300）']},
@@ -1210,18 +1211,34 @@ async function fetchWeek(mon){
   weekFetching[mon]=(async()=>{
     try{
       const q=[['timeMin',twISO(mon,'00:00')],['timeMax',twISO(addDays(mon,7),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']];
-      const [d,hd]=await Promise.all([gcal('GET','/events',null,q),gcal('GET','/events',null,q,HOLIDAY_CAL).catch(()=>null)]);
+      const [d,hd,sh]=await Promise.all([gcal('GET','/events',null,q),gcal('GET','/events',null,q,HOLIDAY_CAL).catch(()=>null),fetchShifts(mon,addDays(mon,7))]);
       const all=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
       weekCache[mon]={at:Date.now(),
         events:all.filter(e=>e.start&&e.start.dateTime&&e.extendedProperties?.private?.kind!=='reminder'),
         leaves:all.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start&&e.start.date),
+        shifts:sh||[],
         holidays:(hd&&hd.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.date).map(e=>({date:e.start.date,end:e.end?.date,name:e.summary||'',desc:e.description||''}))};
       return weekCache[mon];
     }finally{delete weekFetching[mon];}
   })();
   return weekFetching[mon];
 }
-function applyWeek(mon){const c=weekCache[mon];weekEvents=c.events;weekLeaves=c.leaves;weekHolidays=c.holidays;weekKey=mon;}
+// ── 泰順H14 排班：讀老闆的行事曆，只認標題是「林似儒」或「阿森」的行程（只讀不寫）──
+const SHIFT_CAL='c_2bb04f82a408245d0d6578f485e7dc1123b0ce7e39cdfc7e03a923b45b7febb5@group.calendar.google.com';
+const SHIFT_NAMES=['林似儒','阿森'];
+const SHIFT_LABEL='泰順H14',SHIFT_PLACE='泰順錄音室';
+function isMyShift(e){
+  const t=String(e.summary||'').normalize('NFKC').replace(/[\s\u3000]+/g,'');
+  return e.status!=='cancelled'&&!!e.start?.dateTime&&SHIFT_NAMES.includes(t);
+}
+async function fetchShifts(fromDs,toDs){
+  try{
+    const d=await gcal('GET','/events',null,[['timeMin',twISO(fromDs,'00:00')],['timeMax',twISO(toDs,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']],SHIFT_CAL);
+    return (d&&d.items||[]).filter(isMyShift).map(e=>({id:e.id,start:e.start.dateTime,end:e.end.dateTime}));
+  }catch(e){console.warn('shifts',e.message);return [];}
+}
+let todayShifts=[],weekShifts=[];
+function applyWeek(mon){const c=weekCache[mon];weekEvents=c.events;weekLeaves=c.leaves;weekHolidays=c.holidays;weekShifts=c.shifts||[];weekKey=mon;}
 function prefetchAround(mon){[addDays(mon,7),addDays(mon,-7)].forEach(m=>{if(!weekCache[m]||Date.now()-weekCache[m].at>5*60000)fetchWeek(m).catch(()=>{});});}
 async function loadWeek(){
   const mon=mondayOf(weekOffset);
@@ -1526,6 +1543,7 @@ async function loadToday(){
   try{
     const d=await gcal('GET','/events',null,[['timeMin',twISO(addDays(td,-1),'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','200']]);
     todayEvents=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&(e.extendedProperties?.private?.studentId||isSub(e)));
+    todayShifts=(await fetchShifts(td,addDays(td,1)));
     todayKey=td;
   }catch(e){todayEvents=null;}
 }
@@ -2092,6 +2110,8 @@ async function buildExport(){
     const d=await gcal('GET','/events',null,[['timeMin',twISO(addDays(ds,-14),'00:00')],['timeMax',twISO(addDays(chEnd,14),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]);
     if(seq!==exportSeq) return;
     const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+    const expShifts=await fetchShifts(ds,end);
+    if(seq!==exportSeq) return;
     const lessons=items.filter(e=>e.start?.dateTime&&(e.extendedProperties?.private?.studentId||isSub(e)));
     const tLeaves=items.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start?.date);
     const out=[];
@@ -2099,10 +2119,12 @@ async function buildExport(){
       const day=addDays(ds,i);
       const wd='一二三四五六日'[(new Date(day+'T00:00:00Z').getUTCDay()+6)%7];
       out.push(`${mdShort(day)} ${wd}`);
+      const shiftItems=(expShifts||[]).filter(sh=>evParts(sh.start).date===day).map(sh=>{const p=evParts(sh.start);const dur=Math.round((new Date(sh.end)-new Date(sh.start))/60000);return{st:p.min,en:p.min+dur,name:SHIFT_LABEL,moved:false,empty:false};});
       const all=lessons.filter(e=>evParts(e.start.dateTime).date===day)
         .map(e=>{const p=evParts(e.start.dateTime);const dur=Math.round((new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000);
           return{st:p.min,en:p.min+dur,name:isSub(e)?'代'+(e.extendedProperties.private.subStudent||''):(()=>{const st=students.find(x=>x.id===e.extendedProperties.private.studentId);const n=st&&(st.nick||'').split(/[\s、,，\/]+/)[0];return n||shortName(evName(e));})(),moved:e.extendedProperties.private.moved==='1',empty:!!evState(e)};})
         .sort((a,b)=>a.st-b.st||a.en-b.en);
+      all.push(...shiftItems);all.sort((a,b)=>a.st-b.st||a.en-b.en);
       // 請假、停課的時段顯示成空白；若已被別人的課佔用就不列
       const act=all.filter(x=>!x.empty||!all.some(y=>!y.empty&&y.st<x.en&&y.en>x.st));
       const off=tLeaves.some(e=>leaveDays(e).includes(day));
@@ -2302,7 +2324,10 @@ function unrecHtml(){
   const now=Date.now();
   let html=`<div style="${wrapS}display:flex;align-items:baseline;justify-content:space-between;">
     <div class="sec-line" style="margin:0;"><div class="section-title">今日課程</div><div class="rec-count">・${all.length} 堂</div></div></div>`;
-  if(!all.length) return html+`<div style="${box}font-size:13px;color:var(--text3);">今天沒有課</div>`;
+  const shRows=(todayShifts||[]).filter(sh=>evParts(sh.start).date===td).map(sh=>`<div style="display:flex;gap:10px;padding:9px 0;align-items:center;border-top:1px solid var(--border);">
+      <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${evParts(sh.start).hhmm}</div>
+      <div style="flex:1;font-size:14px;font-weight:700;color:#2fb5a0;">🎧 ${SHIFT_LABEL}<span style="font-size:12px;font-weight:400;color:var(--text3);">・班 ${evParts(sh.start).hhmm}–${evParts(sh.end).hhmm}</span></div></div>`).join('');
+  if(!all.length) return html+(shRows?`<div style="${box}padding:4px 12px;">${shRows.replace('border-top:1px solid var(--border);','')}</div>`:`<div style="${box}font-size:13px;color:var(--text3);">今天沒有課</div>`);
   html+=`<div style="${box}padding:4px 12px;">`+all.map((e,i)=>{
     const p=evParts(e.start.dateTime);const st=evState(e);const sub=isSub(e);const pr=e.extendedProperties?.private||{};
     const sid=pr.studentId;const ended=new Date(e.end.dateTime).getTime()<=now;
@@ -2333,7 +2358,7 @@ function unrecHtml(){
           <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${!sub&&isTrial(students.find(x=>x.id===sid))?'🌱 ':''}${esc(name)}${!sub&&todos.some(t=>t.sid===sid)?' <span style="font-size:11px;" title="有待辦">☑️</span>':''}</div><div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">・${sub2}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
         </div>
       </div>${detail}</div>`;
-  }).join('')+`</div>`;
+  }).join('')+shRows+`</div>`;
   return html;
 }
 
@@ -2379,6 +2404,11 @@ function todayPlaceSpans(){
     const p=lessonPlace(e);if(!p)return;
     const st=new Date(e.start.dateTime).getTime(),en=new Date(e.end.dateTime).getTime();
     if(!m[p]) m[p]={place:p,start:st,end:en,count:0};
+    m[p].start=Math.min(m[p].start,st);m[p].end=Math.max(m[p].end,en);m[p].count++;
+  });
+  (todayShifts||[]).forEach(sh=>{
+    const st=new Date(sh.start).getTime(),en=new Date(sh.end).getTime();const p=SHIFT_PLACE;
+    if(!m[p]) m[p]={place:p,start:st,end:en,count:0,shift:true};
     m[p].start=Math.min(m[p].start,st);m[p].end=Math.max(m[p].end,en);m[p].count++;
   });
   return Object.values(m).sort((a,b)=>a.start-b.start);
@@ -3198,6 +3228,12 @@ const HELP=[
   ['日期寫法','10/31、10月31日、今天、明天、後天、週六、下週六、這週六'],
   ['時間寫法','19:00、7點、晚上七點半、下午3點（只寫 1～7 點會當作下午／晚上）'],
   ['安全機制','送出後一定會先顯示確認卡片，按「確定」才會真的修改。'],
+ ]},
+ {t:'🎧 泰順H14 排班',items:[
+  ['自動讀取','系統會讀老闆的排班行事曆，只認標題是「林似儒」或「阿森」的行程，其他人的班和「阿森真的不行」這類行程都會略過。只讀不寫，不會改到老闆的行事曆。'],
+  ['顯示','課表上用青綠色顯示「泰順H14」，首頁今日課程和匯出課表也會列出。'],
+  ['打卡','有班的日子，人在泰順附近打開網站就會自動打卡，下班時間就是表定時間，不用按下班；表定下班後 30 分鐘提醒填時數。'],
+  ['排班改了','老闆改或刪排班，下次打開網站或按首頁重新整理就會更新。'],
  ]},
  {t:'🕘 打卡',items:[
   ['設定教室位置','設定 → 教室位置，人在教室時按「設為目前位置」，每間設一次。'],
@@ -4062,6 +4098,11 @@ function renderSchedule(){
       const s=isSub(ev)?{id:'',subId:ev.id,name:'代 '+(pr0.subStudent||''),room:pr0.room||'',sub:true}:(students.find(x=>x.id===sid)||{id:'',name:(ev.summary||'').replace('🥁 ',''),room:ev.location||''});
       evs.push({s,dayIdx:(p.dow+6)%7,norm:p.hhmm,dur,st:p.min,en:p.min+dur,booking:ev.extendedProperties?.private?.kind==='booking',state:evState(ev)});
     });
+    (weekShifts||[]).forEach(sh=>{
+      const p=evParts(sh.start);const dur=Math.round((new Date(sh.end)-new Date(sh.start))/60000)||60;
+      const st=Math.max(p.min,START_H*60);if(st>=END_H*60) return;
+      evs.push({s:{id:'',name:SHIFT_LABEL,room:SHIFT_PLACE,shift:true},dayIdx:(p.dow+6)%7,norm:p.hhmm,dur:Math.min(dur,END_H*60-st),st,en:Math.min(p.min+dur,END_H*60),booking:false,state:''});
+    });
   }else if(weekOffset===0&&!useCal){
     activeStudents.filter(s=>!isBooking(s)).forEach(s=>{
       const dayIdx=DAYS.indexOf(s.day);
@@ -4101,7 +4142,7 @@ function renderSchedule(){
     const {s,norm,dur,k,n,booking,state}=e;
     const dayIdx=colOf(e.dayIdx);if(dayIdx<0) return '';
     const rc0=roomOf(s.room);
-    const rc=state?{...rc0,color:'#666666'}:s.sub?{...rc0,color:'#c8a84a'}:rc0;
+    const rc=state?{...rc0,color:'#666666'}:s.sub?{...rc0,color:'#c8a84a'}:s.shift?{...rc0,color:'#2fb5a0'}:rc0;
     const topPx=(e.st-START_H*60)/60*ROW_H;
     const heightPx=Math.max(dur/60*ROW_H,HALF_H*0.8);
     // 錯開距離：所有卡片總共往右錯開欄寬的 45%
