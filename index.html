@@ -968,8 +968,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.06-7';
+const APP_VERSION='2026.10.07-1';
 const CHANGELOG=[
+  {v:'2026.10.07-1',items:['最新動態新增「打卡」分頁，列出最近一個月的打卡','修正：當天上課紀錄都寫完了，晚上的填紀錄提醒有時沒有取消','泰順時數提醒改成依打卡的下班時間（表定或按下班後）＋30 分鐘，不需要按「下班」也會提醒']},
   {v:'2026.10.06-7',items:['首頁標題卡放大，標題和日期字體加大','修正：匯出課表的日期和天數欄位在手機上重疊（所有表單的並排欄位一起修正）','修正：匯出課表時空堂的時間格式跟其他時段不一致（例如 11-12 後面變成 1200-1300）']},
   {v:'2026.10.06-6',items:['近期課程裡已經過去的那堂課改成暗色顯示，跟請假的課一樣']},
   {v:'2026.10.06-5',items:['近期課程只顯示最近一週內、已過去的最後一堂','新增「曠課」：照常計薪、不用補課，課表和紀錄以 🚷 標示','曠課初犯要順延的話，用「請假」並選理由「曠課」，就不計薪、可補課','指令框：「小明 10/5 曠課」記為曠課；「小明 10/5 請假 曠課」則是請假']},
@@ -2877,7 +2878,7 @@ async function syncFormReminder(ds){
       for(const r of rem.slice(1)) await ck('DELETE',`/events/${r.id}`);
     }else await ck('POST','/events',body);
     // 按了「下班」→ 下班後 30 分鐘再提醒一次（太接近晚上那次就不另外提醒）
-    const outs=checks.filter(e=>e.extendedProperties?.private?.checkedOut==='1');
+    const outs=checks; // 依打卡的下班時間（表定或按「下班」更新後）
     let want=null;
     if(outs.length){
       const lastEnd=Math.max(...outs.map(e=>new Date(e.end.dateTime).getTime()));
@@ -2956,9 +2957,15 @@ async function syncMonthToNotion(){
 
 // ── 每日填紀錄提醒：當天的課都寫完（或沒有課）就取消當天那次通知 ──
 let drBusy=false;
+let drAgain=false;
 async function syncDailyReminder(){
-  if(drBusy||!gcalValid()||!reminderEv||!todayEvents||todayKey!==twToday()) return;
-  drBusy=true;
+  if(drBusy){drAgain=true;return;}   // 正在檢查中 → 結束後用最新資料再檢查一次
+  if(!gcalValid()) return;
+  if(!reminderEv) await loadReminder();
+  if(!reminderEv) return;
+  if(!todayEvents||todayKey!==twToday()) await loadToday();
+  if(!todayEvents) return;
+  drBusy=true;drAgain=false;
   try{
     const td=twToday();
     const lessons=todayEvents.filter(e=>evParts(e.start.dateTime).date===td&&!evState(e));
@@ -2969,7 +2976,7 @@ async function syncDailyReminder(){
     if(allDone&&inst.status!=='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'cancelled'});
     else if(!allDone&&inst.status==='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'confirmed'});
   }catch(e){console.warn('dailyReminder',e.message);}
-  finally{drBusy=false;}
+  finally{drBusy=false;if(drAgain){drAgain=false;setTimeout(syncDailyReminder,300);}}
 }
 
 // ══════════ 課程異動同步到 Notion「課程異動」資料庫 ══════════
@@ -3102,6 +3109,7 @@ const HELP=[
   ['在哪裡','首頁標題卡右上角的鈴鐺。'],
   ['行程','最近的請假、停課、調課、補課、代課、老師請假和新增學生，依時間排列。'],
   ['上課紀錄','最近新增或修改的上課紀錄，點了直接打開那篇。'],
+  ['打卡','最近一個月的打卡，點了可以修改。'],
  ]},
  {t:'📅 課表',items:[
   ['切換週／日','右上「Week」切換成「Day」只看一天，再按切回整週。左右滑動或按 ‹ › 換到上一週／下一週（Day 模式是前一天／後一天）。'],
@@ -3152,7 +3160,7 @@ const HELP=[
   ['自動打卡','那間教室今天有課、你人在附近時打開網站，就會自動打卡。泰順沒有排課，所以要按打卡按鈕。'],
   ['補打卡','有課卻沒打卡超過 10 分鐘，首頁會出現紅色提醒，按「補打卡」以第一堂課時間補登。'],
   ['下班','預設是最後一堂課結束時間；在錄音室等地方按「下班」記錄當下時間。點打卡那一行可以修改。'],
-  ['泰順時數','有在泰順打卡的日子會提醒填公司時數（含 2 小時通勤）：按「下班」後 30 分鐘一次，晚上 23:30 再一次。填完在首頁按「完成」，兩個提醒都會取消。'],
+  ['泰順時數','有在泰順打卡的日子會提醒填公司時數（含 2 小時通勤）：打卡的下班時間後 30 分鐘一次（按「下班」會更新成實際時間），晚上 23:30 再一次。填完在首頁按「完成」，兩個提醒都會取消。'],
  ]},
  {t:'💰 薪資',items:[
   ['應領怎麼算','時薪 × 實際上課時數；學生有特別時薪就用特別價；請假、老師停課不算；代課和體驗課照教室時薪。當月只算已上完的課。'],
@@ -3204,7 +3212,8 @@ async function renderFeed(){
   const wrap=document.getElementById('feed-wrap');
   const tabs=`<div class="filter-scroll" style="padding:0 0 12px;">
     <div class="chip${feedTab==='sched'?' active':''}" onclick="setFeedTab('sched')">行程</div>
-    <div class="chip${feedTab==='rec'?' active':''}" onclick="setFeedTab('rec')">上課紀錄</div></div>`;
+    <div class="chip${feedTab==='rec'?' active':''}" onclick="setFeedTab('rec')">上課紀錄</div>
+    <div class="chip${feedTab==='ck'?' active':''}" onclick="setFeedTab('ck')">打卡</div></div>`;
   wrap.innerHTML=tabs+`<div class="rec-empty">讀取中…</div>`;
   const tab=feedTab;
   try{
@@ -3218,6 +3227,13 @@ async function renderFeed(){
       })).catch(()=>[]));
       qs.push(notionAPI('POST',`/databases/${DB_STUDENTS}/query`,{sorts:[{timestamp:'created_time',direction:'descending'}],page_size:20}).then(d=>(d.results||[]).map(p=>({at:p.created_time,icon:'👤',title:`新增學生 ${gp(p,'學生','title')}`,sub:gp(p,'教室','select')||'',click:`openDetail('${p.id}','feed')`}))).catch(()=>[]));
       items=(await Promise.all(qs)).flat();
+    }else if(tab==='ck'){
+      const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(addDays(twToday(),-31),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','300']]);
+      items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime).map(e=>{
+        const pr=e.extendedProperties?.private||{};const a=evParts(e.start.dateTime),b=evParts(e.end.dateTime);
+        const hrs=((new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000).toFixed(1);
+        return{at:e.start.dateTime,icon:'📍',title:`${(pr.place||'').replace(' Yamaha','')} ${a.hhmm}–${b.hhmm}`,sub:`${hrs}h・${pr.how||'打卡'}${pr.checkedOut==='1'?'・有按下班':''}`,click:`openCheckinEdit('${e.id}')`};
+      });
     }else{
       const d=await notionAPI('POST',`/databases/${DB_RECORDS}/query`,{sorts:[{timestamp:'last_edited_time',direction:'descending'}],page_size:50});
       items=(d.results||[]).map(p=>{
