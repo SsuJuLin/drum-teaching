@@ -728,6 +728,26 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
   </div>
 </div>
 
+<!-- TODO SHEET -->
+<div class="overlay" id="sheet-todo">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">☑️ 新增待辦</div>
+    <div class="sheet-body">
+      <div class="form-group"><label class="form-label">內容（一行一項）</label><textarea class="form-textarea" id="todo-text" style="min-height:60px;" placeholder="例：印 Galway Girl 的譜"></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">學生</label><select class="form-select" id="todo-stu" onchange="todoStuChanged()"></select></div>
+        <div class="form-group"><label class="form-label">期限</label><input class="form-input" type="date" id="todo-due"></div>
+      </div>
+      <div id="todo-hint" style="font-size:11px;color:var(--text3);margin-top:-6px;"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-todo')">取消</button>
+      <button class="btn-save" onclick="saveTodoNew()">✅ 新增</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -968,8 +988,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-1';
+const APP_VERSION='2026.10.07-2';
 const CHANGELOG=[
+  {v:'2026.10.07-2',items:['可以自己新增待辦：首頁待辦區和學生頁的「＋」，或指令框「小明 待辦 印譜」','新增個人待辦（不屬於學生），例如「待辦 買鼓棒 10/10」','選了學生，期限會自動設成他的下一堂課']},
   {v:'2026.10.07-1',items:['最新動態新增「打卡」分頁，列出最近一個月的打卡','修正：當天上課紀錄都寫完了，晚上的填紀錄提醒有時沒有取消','泰順時數提醒改成依打卡的下班時間（表定或按下班後）＋30 分鐘，不需要按「下班」也會提醒']},
   {v:'2026.10.06-7',items:['首頁標題卡放大，標題和日期字體加大','修正：匯出課表的日期和天數欄位在手機上重疊（所有表單的並排欄位一起修正）','修正：匯出課表時空堂的時間格式跟其他時段不一致（例如 11-12 後面變成 1200-1300）']},
   {v:'2026.10.06-6',items:['近期課程裡已經過去的那堂課改成暗色顯示，跟請假的課一樣']},
@@ -1841,6 +1862,14 @@ function findStudent(text){
 function parseCommand(text){
   const dates=findDates(text),times=findTimes(text);
   const st=findStudent(text);
+  if(/待辦/.test(text)){
+    let body=text.replace(/^.*?待辦\s*[：:]?\s*/,'');
+    dates.forEach(d=>{body=body.replace(text.slice(d.i,d.i+d.len),'');});
+    if(st&&!st.ambig) body=body.replace(st.name,'').replace(cleanName(st.name).slice(-2),'');
+    body=body.trim();
+    if(!body) return{error:'請寫待辦內容，例如「小明 待辦 印譜」或「待辦 買鼓棒 10/10」'};
+    return{action:'todo',student:st&&!st.ambig?st:null,content:body,due:dates.length?dates[0].ds:undefined};
+  }
   // 老師請假
   if(/停課|(我|老師).{0,8}請假|請假.{0,3}(我|老師)/.test(text)&&(!st||/(我|老師)\s*(要)?請假|停課/.test(text))){
     if(!dates.length) return{error:'請說明請假日期，例如「11/16-11/24 我請假 出差」'};
@@ -1906,6 +1935,18 @@ async function runCommand(){
   const c=parseCommand(text); // ← 之後 B：可先問 AI，回傳同樣格式的物件
   if(c.error){out.innerHTML=cmdMsg(c.error,true);return;}
   try{
+    if(c.action==='todo'){
+      let due=c.due;
+      if(due===undefined&&c.student) due=await nextLessonDate(c.student.id,addDays(twToday(),-1));
+      c.due=due||null;
+      cmdPending={...c};
+      out.innerHTML=`<div style="background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-top:10px;">
+        <div style="font-size:14px;font-weight:700;color:var(--text);">☑️ ${esc(c.content)}</div>
+        <div style="font-size:13px;color:#c8a84a;margin:4px 0 10px;">→ ${c.student?esc(c.student.name):'個人'}・${c.due?(c.student?'下次上課 ':'期限 ')+fmtMD(c.due):'沒有期限'}</div>
+        <div style="display:flex;gap:8px;"><button class="btn-cancel" style="flex:1;" onclick="cmdPending=null;document.getElementById('cmd-result').innerHTML='';">取消</button>
+        <button class="btn-save" style="flex:1;" id="cmd-ok" onclick="confirmCommand()">✅ 確定</button></div></div>`;
+      return;
+    }
     if(c.action==='teacherLeave'){
       cmdPending=null;out.innerHTML='';
       openLeave();
@@ -1970,7 +2011,8 @@ async function confirmCommand(){
   const out=document.getElementById('cmd-result');
   try{
     const s=c.student;
-    if(c.action==='leave') await markEvent(c.ev,'leave',c.reason);
+    if(c.action==='todo'){await createTodos(s?s.id:'',[c.content],null,c.due);}
+    else if(c.action==='leave') await markEvent(c.ev,'leave',c.reason);
     else if(c.action==='absent') await markEvent(c.ev,'absent');
     else if(c.action==='restore') await markEvent(c.ev,'');
     else if(c.action==='cancel'){await gcal('DELETE',`/events/${c.ev.id}`);chDelete(`${c.ev.id}|補課`);}
@@ -3103,6 +3145,7 @@ const HELP=[
   ['點歌','學生頁「＋ 點歌」輸入歌名，連結可以不填。點歌名會開 YouTube：有連結就開那支影片，沒有就搜尋歌名。'],
   ['點歌狀態','點「想學／練習中」切換狀態；學會了按「✅ 完成」，會收進「已學會」，需要時可以點開恢復。按 ✎ 可以修改或刪除。'],
   ['待辦','寫上課紀錄時在「待辦」欄一行打一項，例如「印掉了的譜」。期限自動設成那位學生的下一堂課。'],
+  ['新增待辦','首頁待辦區或學生頁按「＋」；也可以用指令框「小明 待辦 印譜」。不選學生就是個人待辦，例如「待辦 買鼓棒 10/10」。'],
   ['完成待辦','首頁或學生頁的待辦，勾左邊的方框就完成。明天要上課的是黃色，過期是紅色。'],
  ]},
  {t:'🔔 最新動態',items:[
@@ -3151,6 +3194,7 @@ const HELP=[
   ['取消補課','小明 11/5 取消補課'],
   ['補登過去的課','洛禎 10/1 1800-1900 補登（照常計薪，不算補課）'],
   ['老師請假','11/16-11/24 我請假 中國出差'],
+  ['待辦','小明 待辦 印 Galway Girl 的譜　／　待辦 買鼓棒 10/10'],
   ['日期寫法','10/31、10月31日、今天、明天、後天、週六、下週六、這週六'],
   ['時間寫法','19:00、7點、晚上七點半、下午3點（只寫 1～7 點會當作下午／晚上）'],
   ['安全機制','送出後一定會先顯示確認卡片，按「確定」才會真的修改。'],
@@ -3411,11 +3455,11 @@ async function nextLessonDate(sid,afterDate){
     return ev?evParts(ev.start.dateTime).date:null;
   }catch(e){return null;}
 }
-async function createTodos(sid,lines,fromDate){
+async function createTodos(sid,lines,fromDate,dueOverride){
   if(!lines.length) return;
-  const due=await nextLessonDate(sid,fromDate||twToday());
+  const due=dueOverride!==undefined?dueOverride:(sid?await nextLessonDate(sid,fromDate||twToday()):null);
   for(const t of lines){
-    try{const sc=await getSchema(DB_TODOS);await notionAPI('POST','/pages',{parent:{database_id:DB_TODOS},properties:{[titleKey(sc,'內容')]:{title:[{text:{content:t.slice(0,200)}}]},'學生':{relation:[{id:sid}]},'完成':{checkbox:false},...(due?{'期限':{date:{start:due}}}:{})}});}catch(e){console.warn(e);}
+    try{const sc=await getSchema(DB_TODOS);await notionAPI('POST','/pages',{parent:{database_id:DB_TODOS},properties:{[titleKey(sc,'內容')]:{title:[{text:{content:t.slice(0,200)}}]},...(sid?{'學生':{relation:[{id:sid}]}}:{}),'完成':{checkbox:false},...(due?{'期限':{date:{start:due}}}:{})}});}catch(e){console.warn(e);}
   }
   await loadTodos();
 }
@@ -3432,18 +3476,51 @@ function todoRow(t,showName){
   return`<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-top:1px solid var(--border);">
     <button onclick="doneTodo('${t.id}')" aria-label="完成" style="width:20px;height:20px;flex-shrink:0;margin-top:1px;border-radius:5px;border:1.5px solid var(--text3);background:none;cursor:pointer;"></button>
     <div style="flex:1;min-width:0;"><div style="font-size:14px;color:var(--text);">${esc(t.text)}</div>
-    <div style="font-size:11px;color:${col};">${showName&&s?esc(s.name)+'・':''}${when}</div></div></div>`;
+    <div style="font-size:11px;color:${col};">${showName?(s?esc(s.name):'個人')+'・':''}${t.sid?when:(t.due?(t.due<td?`已過期・${fmtMD(t.due)}`:`期限 ${fmtMD(t.due)}`):'沒有期限')}</div></div></div>`;
 }
 function todoHomeHtml(){
-  if(!todos.length) return '';
   const list=[...todos].sort((a,b)=>(a.due||'9999')<(b.due||'9999')?-1:1);
-  return`<div style="margin:0 16px 10px;"><div class="sec-line" style="margin-bottom:6px;"><div class="section-title">待辦</div><div class="rec-count">・${list.length} 項</div></div>
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:2px 12px 4px;">${list.map(t=>todoRow(t,true)).join('').replace('border-top:1px solid var(--border);','')}</div></div>`;
+  return`<div style="margin:0 16px 10px;"><div style="display:flex;align-items:center;margin-bottom:6px;"><div class="sec-line" style="margin:0;"><div class="section-title">待辦</div><div class="rec-count">・${list.length} 項</div></div>
+      <button class="add-rec-btn" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="openTodoNew()">＋</button></div>
+    ${list.length?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:2px 12px 4px;">${list.map(t=>todoRow(t,true)).join('').replace('border-top:1px solid var(--border);','')}</div>`:''}</div>`;
 }
 function todoStudentHtml(sid){
-  const list=todos.filter(t=>t.sid===sid);if(!list.length) return '';
-  return`<div class="rec-section-head"><div class="sec-line"><div class="section-title">待辦</div><div class="rec-count">・${list.length} 項</div></div></div>
-    <div style="margin-bottom:18px;">${list.map(t=>todoRow(t,false)).join('')}</div>`;
+  const list=todos.filter(t=>t.sid===sid);
+  return`<div class="rec-section-head"><div class="sec-line"><div class="section-title">待辦</div><div class="rec-count">・${list.length} 項</div></div>
+      <button class="add-rec-btn" onclick="openTodoNew('${sid}')">＋ 待辦</button></div>
+    <div style="margin-bottom:18px;">${list.length?list.map(t=>todoRow(t,false)).join(''):''}</div>`;
+}
+let todoNewSid=null;
+function openTodoNew(sid){
+  const sel=document.getElementById('todo-stu');
+  const list=students.filter(s=>s.status!=='不上課').sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
+  sel.innerHTML=`<option value="">個人（不屬於學生）</option>`+list.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  sel.value=sid||'';
+  document.getElementById('todo-text').value='';document.getElementById('todo-due').value='';
+  document.getElementById('todo-hint').textContent='';
+  document.getElementById('sheet-todo').classList.add('show');
+  todoStuChanged();
+  setTimeout(()=>document.getElementById('todo-text').focus(),200);
+}
+async function todoStuChanged(){
+  const sid=document.getElementById('todo-stu').value;const hint=document.getElementById('todo-hint');
+  if(!sid){hint.textContent='個人待辦：期限可以自己選，也可以留空';return;}
+  hint.textContent='查詢下一堂課…';
+  const d=await nextLessonDate(sid,addDays(twToday(),-1));
+  if(document.getElementById('todo-stu').value!==sid) return;
+  if(d){document.getElementById('todo-due').value=d;hint.textContent=`期限自動設為下一堂課 ${fmtMD(d)}，可以改`;}
+  else hint.textContent='找不到下一堂課，期限可以自己選';
+}
+async function saveTodoNew(){
+  const text=document.getElementById('todo-text').value.trim();
+  if(!text){showToast('請輸入內容');return;}
+  const sid=document.getElementById('todo-stu').value||'';
+  const due=document.getElementById('todo-due').value||null;
+  const lines=text.split('\n').map(x=>x.trim()).filter(Boolean);
+  closeSheet('sheet-todo');
+  await createTodos(sid,lines,null,due);
+  showToast(`✅ 已新增 ${lines.length} 項待辦`);
+  if(curPage==='home') renderHome();if(curPage==='detail'&&sid) renderDetail(sid);
 }
 
 function renderChangelog(){
