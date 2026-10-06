@@ -988,8 +988,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-3';
+const APP_VERSION='2026.10.07-4';
 const CHANGELOG=[
+  {v:'2026.10.07-4',items:['學生頁不再計算待補課，只顯示請假次數','首頁「待辦」改名「待辦事項」','最新動態新增「待辦事項」分頁，列出已完成的項目和完成時間','學生篩選「約課制」和「體驗」合併成「約課制/體驗」']},
   {v:'2026.10.07-3',items:['泰順H14 排班連動：讀取老闆的行事曆，只認標題「林似儒」或「阿森」的行程（只讀不寫）','課表、今日課程、匯出課表都會顯示泰順H14 的班','有班的日子，人在泰順附近會自動打卡，下班時間自動帶入表定時間，不用按下班；有班沒打卡會提醒']},
   {v:'2026.10.07-2',items:['可以自己新增待辦：首頁待辦區和學生頁的「＋」，或指令框「小明 待辦 印譜」','新增個人待辦（不屬於學生），例如「待辦 買鼓棒 10/10」','選了學生，期限會自動設成他的下一堂課']},
   {v:'2026.10.07-1',items:['最新動態新增「打卡」分頁，列出最近一個月的打卡','修正：當天上課紀錄都寫完了，晚上的填紀錄提醒有時沒有取消','泰順時數提醒改成依打卡的下班時間（表定或按下班後）＋30 分鐘，不需要按「下班」也會提醒']},
@@ -1368,7 +1369,7 @@ async function loadUpcoming(sid){
     const leaves=all.filter(e=>evState(e)==='leave'&&e.extendedProperties.private.kind==='weekly');
     const makeups=all.filter(e=>e.extendedProperties.private.makeup==='1'&&!evState(e));
     const owed=Math.max(0,leaves.length-makeups.length);
-    if(statBox) statBox.textContent=s&&!isBooking(s)?`・請假 ${leaves.length}・已補 ${makeups.length}・待補 ${owed}`:'';
+    if(statBox) statBox.textContent=s&&!isBooking(s)&&leaves.length?`・請假 ${leaves.length} 次`:'';
     const now=Date.now();
     const past=all.filter(e=>new Date(e.end.dateTime).getTime()<now&&new Date(e.start.dateTime).getTime()>now-7*86400000).slice(-1);
     const up=past.concat(all.filter(e=>new Date(e.end.dateTime).getTime()>=now).slice(0,5));
@@ -3183,6 +3184,7 @@ const HELP=[
   ['行程','最近的請假、停課、調課、補課、代課、老師請假和新增學生，依時間排列。'],
   ['上課紀錄','最近新增或修改的上課紀錄，點了直接打開那篇。'],
   ['打卡','最近一個月的打卡，點了可以修改。'],
+  ['待辦事項','已完成的待辦和完成時間，新增的不會列出。'],
  ]},
  {t:'📅 課表',items:[
   ['切換週／日','右上「Week」切換成「Day」只看一天，再按切回整週。左右滑動或按 ‹ › 換到上一週／下一週（Day 模式是前一天／後一天）。'],
@@ -3193,7 +3195,7 @@ const HELP=[
   ['＋ 排課','展開「＋ 加課」（幫某位學生多排一堂：補課、約課或體驗課）和「🔁 代課」。'],
  ]},
  {t:'👤 學生',items:[
-  ['搜尋與篩選','上方搜尋欄可以打名字或暱稱；篩選有各教室、約課制、體驗、暫停／不上課。'],
+  ['搜尋與篩選','上方搜尋欄可以打名字或暱稱；篩選有各教室、約課制/體驗、暫停／不上課。'],
   ['新增學生','右下「＋ 學生」。排課方式選「每週固定」會自動排進每週課表；「約課制」只有約好才出現。'],
   ['暱稱','可填好幾個，用空格分開。指令框、搜尋、匯出課表都會用暱稱。'],
   ['近期課程','學生頁列出最近一週內已上過的最後一堂（標示「已過」）和接下來 5 堂。每堂可以「調課」「請假」；已經過去的課只能請假或取消，事後才知道學生請假或曠課也能補登。'],
@@ -3205,7 +3207,7 @@ const HELP=[
   ['學生請假','學生頁那堂課按「請假」，可以選理由或留空。不會刪掉課，而是標成請假、留下紀錄，按「恢復」可撤銷。請假不計薪、可以補課。'],
   ['曠課','在請假視窗按「🚷 記為曠課」：照常計薪、不用補課。如果曠課要算順延（例如初犯），改用「確定請假」並選理由「曠課」。'],
   ['調課','只移動那一堂，之後每週照常。'],
-  ['補課','學生頁「＋ 補課」或課表「＋ 加課」。補課會自動抵掉請假，學生頁顯示「請假・已補・待補」。'],
+  ['補課','學生頁「＋ 補課」或課表「＋ 加課」。學生頁會顯示請假次數，補不補課由你決定。'],
   ['老師請假','首頁「＋ 請假」，選日期和事由。期間的課會變成「⛔ 老師停課」，不算學生請假、不需補課；期間也無法排課。'],
   ['停課改期','老師停課的課可以按「調課」改到其他日期，會恢復成正常上課。'],
   ['取消請假','設定 → 請假紀錄 → 我的請假 →「取消請假」，停課的課會全部恢復。'],
@@ -3293,7 +3295,8 @@ async function renderFeed(){
   const tabs=`<div class="filter-scroll" style="padding:0 0 12px;">
     <div class="chip${feedTab==='sched'?' active':''}" onclick="setFeedTab('sched')">行程</div>
     <div class="chip${feedTab==='rec'?' active':''}" onclick="setFeedTab('rec')">上課紀錄</div>
-    <div class="chip${feedTab==='ck'?' active':''}" onclick="setFeedTab('ck')">打卡</div></div>`;
+    <div class="chip${feedTab==='ck'?' active':''}" onclick="setFeedTab('ck')">打卡</div>
+    <div class="chip${feedTab==='todo'?' active':''}" onclick="setFeedTab('todo')">待辦事項</div></div>`;
   wrap.innerHTML=tabs+`<div class="rec-empty">讀取中…</div>`;
   const tab=feedTab;
   try{
@@ -3307,6 +3310,11 @@ async function renderFeed(){
       })).catch(()=>[]));
       qs.push(notionAPI('POST',`/databases/${DB_STUDENTS}/query`,{sorts:[{timestamp:'created_time',direction:'descending'}],page_size:20}).then(d=>(d.results||[]).map(p=>({at:p.created_time,icon:'👤',title:`新增學生 ${gp(p,'學生','title')}`,sub:gp(p,'教室','select')||'',click:`openDetail('${p.id}','feed')`}))).catch(()=>[]));
       items=(await Promise.all(qs)).flat();
+    }else if(tab==='todo'){
+      const sc=await getSchema(DB_TODOS);const tk=titleKey(sc,'內容');
+      const d=await notionAPI('POST',`/databases/${DB_TODOS}/query`,{filter:{property:'完成',checkbox:{equals:true}},sorts:[{timestamp:'last_edited_time',direction:'descending'}],page_size:60});
+      items=(d.results||[]).map(p=>{const sid=gp(p,'學生','relation');const st=students.find(x=>x.id===sid);
+        return{at:p.last_edited_time,icon:'✅',title:gp(p,tk,'title'),sub:`${st?st.name:'個人'}・完成`,click:null};});
     }else if(tab==='ck'){
       const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(addDays(twToday(),-31),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','300']]);
       items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime).map(e=>{
@@ -3516,7 +3524,7 @@ function todoRow(t,showName){
 }
 function todoHomeHtml(){
   const list=[...todos].sort((a,b)=>(a.due||'9999')<(b.due||'9999')?-1:1);
-  return`<div style="margin:0 16px 10px;"><div style="display:flex;align-items:center;margin-bottom:6px;"><div class="sec-line" style="margin:0;"><div class="section-title">待辦</div><div class="rec-count">・${list.length} 項</div></div>
+  return`<div style="margin:0 16px 10px;"><div style="display:flex;align-items:center;margin-bottom:6px;"><div class="sec-line" style="margin:0;"><div class="section-title">待辦事項</div><div class="rec-count">・${list.length} 項</div></div>
       <button class="add-rec-btn" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="openTodoNew()">＋</button></div>
     ${list.length?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:2px 12px 4px;">${list.map(t=>todoRow(t,true)).join('').replace('border-top:1px solid var(--border);','')}</div>`:''}</div>`;
 }
@@ -4200,7 +4208,7 @@ function renderSchedule(){
 let stuFilter2='全部';
 function renderStudents(){
   stuFilter2=stuFilter;
-  const filters=['全部',...CLASSROOMS.map(c=>c.name),'約課制','體驗','暫停/不上課'];
+  const filters=['全部',...CLASSROOMS.map(c=>c.name),'約課制/體驗','暫停/不上課'];
   document.getElementById('filter-scroll').innerHTML=filters.map(f=>
     `<div class="chip${stuFilter===f?' active':''}" onclick="setStuFilter('${f}')">${f}</div>`).join('');
 
@@ -4208,8 +4216,7 @@ function renderStudents(){
   const q=cleanName(document.getElementById('stu-search')?.value||'');
   if(q) list=students.filter(s=>cleanName(s.name).includes(q)||nicksOf(s).some(n=>n.includes(q)));
   else if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status==='暫停上課'||s.status==='不上課');
-  else if(stuFilter==='體驗') list=students.filter(isTrial);
-  else if(stuFilter==='約課制') list=students.filter(s=>isBooking(s)&&s.status!=='不上課');
+  else if(stuFilter==='約課制/體驗') list=students.filter(s=>isBooking(s)&&s.status!=='不上課');
   else if(stuFilter!=='全部') list=students.filter(s=>s.room===stuFilter&&s.status==='正常上課');
   else list=students.filter(s=>s.status==='正常上課');
 
