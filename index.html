@@ -1031,8 +1031,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-8';
+const APP_VERSION='2026.10.07-9';
 const CHANGELOG=[
+  {v:'2026.10.07-9',items:['課表上的泰順班不再顯示分鐘數','返回上一頁的手勢更好用：除了從最左邊緣滑，也可以在畫面上明確往右滑（課表、打卡紀錄、薪資頁除外）']},
   {v:'2026.10.07-8',items:['課表上的泰順班改成顯示「泰順」','指令框從首頁移到標題列左邊的 ⌨️ 按鈕，任何頁面都能打開，完成後自動關閉']},
   {v:'2026.10.07-7',items:['大量操作（老師請假、同步、匯入）不會再因為 Notion 速度限制而默默漏資料，會自動等待重試','打開網站先顯示上次的資料，背景再更新，幾乎不用等','設定頁新增「🩺 系統檢查」：逐項檢查資料庫、欄位、日曆和資料問題','設定頁新增「📦 匯出備份」；每月 1 號起，首頁會提醒直到當月完成備份','設定頁新增「首頁」區，可以隱藏不常用的首頁區塊']},
   {v:'2026.10.07-6',items:['待辦事項快到期時，首頁上方會出現提醒卡片：明天要用的是黃色，今天要用或已過期是紅色，卡片上可以直接勾完成','期限前一天 12:00 由 Google 日曆跳手機通知「⏰ 明天要用：…」，完成後自動取消']},
@@ -4483,7 +4484,7 @@ function renderSchedule(){
       ${layered?'box-shadow:-3px 0 6px rgba(0,0,0,0.45);':''}
     ">
       <div style="font-size:11px;font-weight:700;color:${state?'var(--text3)':layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${state&&state!=='covered'?'text-decoration:line-through;':''}">${state==='covered'?'🧑‍🏫':state==='leave'?'🚫':state==='teacherOff'?'⛔':state==='absent'?'🚷':isTrial(s)?'🌱':''}${s.name}</div>
-      ${heightPx>30?`<div style="font-size:${dayMode?11:9}px;color:var(--text3);line-height:1.3;white-space:nowrap;overflow:hidden;">${norm}${dur!==60?` ${dur}分`:''}${dayMode?`・${esc((s.room||'').replace(' Yamaha',''))}${state==='leave'?'・請假':state==='teacherOff'?'・老師停課':booking?'・約課/補課':''}`:''}</div>`:''}
+      ${heightPx>30?`<div style="font-size:${dayMode?11:9}px;color:var(--text3);line-height:1.3;white-space:nowrap;overflow:hidden;">${norm}${dur!==60&&!s.shift?` ${dur}分`:''}${s.shift&&dayMode?`–${String(Math.floor(e.en/60)).padStart(2,'0')}:${String(e.en%60).padStart(2,'0')}`:''}${dayMode&&!s.shift?`・${esc((s.room||'').replace(' Yamaha',''))}${state==='leave'?'・請假':state==='teacherOff'?'・老師停課':booking?'・約課/補課':''}`:''}</div>`:''}
     </div>`;
   }).join('');
 
@@ -4586,21 +4587,26 @@ window.addEventListener('popstate',e=>{
   }finally{navFromPop=false;}
 });
 try{history.replaceState({page:'home'},'');}catch(e){}
-// 加到主畫面（全螢幕 App）時沒有 Safari 的返回手勢 → 自己做：從左邊緣往右滑
+// 返回上一頁的手勢：從左邊往右滑。
+// 桌面 App 模式：從最左邊緣開始；也可以在畫面任何地方明確往右滑（課表、打卡紀錄、薪資頁除外，那裡的左右滑是換週／換月）
 (function(){
   const standalone=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
-  if(!standalone) return;
-  let sx=0,sy=0,on=false;
+  let sx=0,sy=0,st=0,mode='';
   document.addEventListener('touchstart',e=>{
-    const t=e.touches[0];on=e.touches.length===1&&t.clientX<24;sx=t.clientX;sy=t.clientY;
+    mode='';if(e.touches.length!==1) return;
+    const t=e.touches[0];sx=t.clientX;sy=t.clientY;st=Date.now();
+    if(e.target.closest&&e.target.closest('input,textarea,select,.filter-scroll,table,[data-noswipe]')) return;
+    if(t.clientX<32){if(standalone) mode='edge';return;}          // Safari 瀏覽器的最左邊交給系統原生手勢
+    if(!SWIPE_PAGES[curPage]) mode='free';
   },{passive:true});
   document.addEventListener('touchend',e=>{
-    if(!on) return;on=false;
+    if(!mode) return;const m=mode;mode='';
     const t=e.changedTouches[0];const dx=t.clientX-sx,dy=Math.abs(t.clientY-sy);
-    if(dx>70&&dy<dx*0.6){
-      if(document.querySelector('.overlay.show')){document.querySelectorAll('.overlay.show').forEach(o=>o.classList.remove('show'));return;}
-      if(curPage!=='home') goBack('home');
-    }
+    const ok=m==='edge'?(dx>60&&dy<dx*0.7):(dx>110&&dy<dx*0.45&&Date.now()-st<700);
+    if(!ok) return;
+    if(document.querySelector('.overlay.show')){document.querySelectorAll('.overlay.show').forEach(o=>o.classList.remove('show'));return;}
+    if(curPage!=='home'&&curPage!=='schedule'&&curPage!=='students'&&curPage!=='settings') goBack('home');
+    else if(m==='edge'&&curPage!=='home') goBack('home');
   },{passive:true});
 })();
 function openDetail(id,from){
