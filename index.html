@@ -273,6 +273,11 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
     <div class="page" id="page-settings">
       <div style="padding:4px 16px 24px;" id="settings-wrap"></div>
     </div>
+    <div class="page" id="page-health">
+      <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
+      <div style="padding:0 16px 24px;"><div class="rec-card" style="padding:4px 14px;" id="health-wrap"></div>
+      <div style="text-align:center;margin-top:12px;"><button class="add-rec-btn" onclick="runHealth()">重新檢查</button></div></div>
+    </div>
     <div class="page" id="page-feed">
       <button class="back-bar" onclick="goBack('home')">‹ 返回</button>
       <div style="padding:0 16px 24px;" id="feed-wrap"></div>
@@ -791,11 +796,28 @@ const COLORS=['#5c3a1e','#1e3a5c','#3a1e5c','#1e5c3a','#5c1e3a','#1e5c5c','#3a5c
 let students=[],records=[],selStar=0,curStudent=null,detailFrom='students',stuFilter='全部';
 let editingRecordId=null, editingStudentId=null;
 
+// Notion 每秒約 3 個請求的限制：用「令牌桶」控制速度，被拒絕（429）或伺服器忙碌時自動等待重試
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let nTok=6,nTs=Date.now();
+async function notionSlot(){
+  for(;;){const now=Date.now();nTok=Math.min(6,nTok+(now-nTs)/1000*2.8);nTs=now;
+    if(nTok>=1){nTok-=1;return;}await sleep((1-nTok)/2.8*1000+20);}
+}
 async function notionAPI(method,path,body){
   const url=`https://api.notion.com/v1${path}`;
   const opts={method,headers:{'Authorization':`Bearer ${NOTION_TOKEN}`,'Notion-Version':'2022-06-28','Content-Type':'application/json'}};
   if(body) opts.body=JSON.stringify(body);
-  const r=await fetch(PROXY+encodeURIComponent(url),opts);
+  let r;
+  for(let attempt=0;;attempt++){
+    await notionSlot();
+    try{r=await fetch(PROXY+encodeURIComponent(url),opts);}
+    catch(e){if(attempt<3){await sleep(800*(attempt+1));continue;}throw new Error('網路連線失敗，請稍後再試');}
+    if([429,502,503,504].includes(r.status)&&attempt<5){
+      const ra=parseFloat(r.headers.get('Retry-After')||'0');
+      await sleep(ra>0?ra*1000:Math.min(8000,700*2**attempt));continue;
+    }
+    break;
+  }
   if(r.status===401){
     // 權杖失效（例如已在 Notion 重新產生）→ 清掉舊的，回到輸入畫面
     NOTION_TOKEN='';try{localStorage.removeItem('notion_token');}catch(e){}
@@ -998,8 +1020,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-6';
+const APP_VERSION='2026.10.07-7';
 const CHANGELOG=[
+  {v:'2026.10.07-7',items:['大量操作（老師請假、同步、匯入）不會再因為 Notion 速度限制而默默漏資料，會自動等待重試','打開網站先顯示上次的資料，背景再更新，幾乎不用等','設定頁新增「🩺 系統檢查」：逐項檢查資料庫、欄位、日曆和資料問題','設定頁新增「📦 匯出備份」；每月 1 號起，首頁會提醒直到當月完成備份','設定頁新增「首頁」區，可以隱藏不常用的首頁區塊']},
   {v:'2026.10.07-6',items:['待辦事項快到期時，首頁上方會出現提醒卡片：明天要用的是黃色，今天要用或已過期是紅色，卡片上可以直接勾完成','期限前一天 12:00 由 Google 日曆跳手機通知「⏰ 明天要用：…」，完成後自動取消']},
   {v:'2026.10.07-5',items:['老師請假後可以「代課安排」：依教室填上代課老師，那幾堂改成「🧑‍🏫 某某代課」，不算你的薪水、也不算學生請假','一鍵產生代課交接單：每位學生的上課時間、上一堂內容和狀況、點歌、待辦，直接貼給代課老師','還沒人代的課維持老師停課，之後隨時可以改']},
   {v:'2026.10.07-4',items:['學生頁不再計算待補課，只顯示請假次數','首頁「待辦」改名「待辦事項」','最新動態新增「待辦事項」分頁，列出已完成的項目和完成時間','學生篩選「約課制」和「體驗」合併成「約課制/體驗」']},
@@ -1098,7 +1121,15 @@ async function gcal(method,path,body,query,cal,_retry){
   if(query) url+='?'+new URLSearchParams(query).toString();
   const opts={method,headers:{'Authorization':`Bearer ${gToken}`}};
   if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
-  const r=await fetch(url,opts);
+  let r;
+  for(let attempt=0;;attempt++){
+    try{r=await fetch(url,opts);}
+    catch(e){if(attempt<3){await sleep(800*(attempt+1));continue;}throw new Error('網路連線失敗，請稍後再試');}
+    if((r.status===429||r.status>=500||(r.status===403&&attempt<4&&/rateLimit/i.test(await r.clone().text())))&&attempt<5){
+      await sleep(Math.min(8000,600*2**attempt));continue;
+    }
+    break;
+  }
   if(r.status===401){
     gToken=null;gExp=0;
     if(!_retry&&gRT&&await refreshGToken()) return gcal(method,path,body,query,cal,true);
@@ -2381,6 +2412,7 @@ function unrecHtml(){
 const CHECKIN_CAL_ID='fe01dd3873fbf548161b89997bf1197364b1f9ba9503547f1d41b90eb8379522@group.calendar.google.com';
 const PLACES=['楊梅宏音 Yamaha','林口星玥','內壢奧莉琪','藝文鹿納','泰順錄音室'];
 function ck(method,path,body,query){return gcal(method,path,body,query,CHECKIN_CAL_ID);}
+let settingsLoaded=false;
 let placeCoords={},settingsEv=null,todayChecks=null,todayChecksKey=null;
 async function loadCheckinSettings(){
   try{
@@ -2390,6 +2422,8 @@ async function loadCheckinSettings(){
     const pr=settingsEv?.extendedProperties?.private||{};
     PLACES.forEach((p,i)=>{const v=pr['p'+i];if(v){const[a,b]=v.split(',').map(Number);if(!isNaN(a))placeCoords[p]={lat:a,lng:b};}});
     if(pr.formTime) formTime=pr.formTime;
+    if(pr.lastBackup) lastBackup=pr.lastBackup;
+    settingsLoaded=true;
     if(pr.formOn) formOn=pr.formOn!=='0';
   }catch(e){console.error(e);}
 }
@@ -3278,6 +3312,9 @@ const HELP=[
   ['Google 日曆','每台裝置登入一次就長期有效。顯示「已斷線」時按「連接」。'],
   ['Notion 同步','打卡和課程異動會自動寫進 Notion。過去的資料可以在設定頁按「同步本月」「全部同步」補進去。'],
   ['更換 Notion 權杖','在 Notion 重新產生權杖後，到設定頁按「更換 Notion 權杖」，每台裝置各輸入一次。'],
+  ['系統檢查','設定 → 連線與同步 →「系統檢查」。有功能怪怪的時候先按這個，會告訴你是哪個資料庫或欄位有問題。'],
+  ['備份','設定 →「匯出備份」，下載一個包含所有資料的檔案。每月 1 號開始首頁會提醒，備份後當月就不再提醒。'],
+  ['首頁區塊','設定 →「首頁」，可以隱藏統計數字、打卡、指令框、待辦事項、今日課程，提醒區永遠顯示。'],
   ['版本與更新日誌','首頁或設定頁底部的版本號，點了看每次更新的內容。上傳新版後版本號沒變，代表還在跑舊版。'],
   ['加到手機桌面','iPhone 用 Safari 打開網站 → 分享 →「加入主畫面」。桌面 App 是獨立空間，第一次要再輸入權杖和連接日曆。'],
  ]},
@@ -3715,6 +3752,103 @@ async function syncTodoReminders(){
   finally{trBusy=false;if(trAgain){trAgain=false;setTimeout(syncTodoReminders,300);}}
 }
 
+// ══════════ 系統檢查 ══════════
+const DB_SPECS=[
+  {id:()=>DB_STUDENTS,name:'學生資料庫',need:{'學生':['title'],'教室':['select'],'星期':['select'],'上課時間':['rich_text'],'狀態':['select']},opt:{'排課方式':['select'],'暱稱':['rich_text'],'特別時薪':['number'],'開始上課日':['date'],'藝文起始進度':['number'],'生日':['date'],'家長LINE':['rich_text','url']}},
+  {id:()=>DB_RECORDS,name:'上課紀錄',need:{'名稱':['title'],'日期':['date'],'學生':['relation'],'上課時間':['rich_text'],'上課內容紀錄':['rich_text'],'上課狀況':['rich_text'],'超級讚點數':['number']}},
+  {id:()=>DB_SALARY,name:'薪資紀錄',need:{'名稱':['title'],'日期':['date'],'地點':['select'],'類型':['select'],'金額':['number'],'備註':['rich_text']}},
+  {id:()=>DB_PLACES,name:'教室設定',need:{'地點':['title'],'時薪':['number'],'生效日':['date'],'發薪方式':['select'],'發薪日':['number']}},
+  {id:()=>DB_CHECKIN,name:'打卡紀錄',need:{'名稱':['title'],'日期':['date'],'地點':['select'],'時數':['number'],'方式':['select'],'日曆ID':['rich_text']}},
+  {id:()=>DB_CHANGES,name:'課程異動',need:{'名稱':['title'],'日期':['date'],'類型':['select'],'學生':['rich_text'],'地點':['select'],'說明':['rich_text'],'上課內容':['rich_text'],'上課狀況':['rich_text'],'日曆ID':['rich_text']}},
+  {id:()=>DB_SONGS,name:'點歌',need:{'學生':['relation'],'連結':['url','rich_text'],'狀態':['select','status'],'點歌日':['date']}},
+  {id:()=>DB_TODOS,name:'待辦',need:{'學生':['relation'],'完成':['checkbox'],'期限':['date']}},
+];
+let healthBusy=false;
+async function runHealth(){
+  if(healthBusy) return;healthBusy=true;
+  const box=document.getElementById('health-wrap');
+  const rows=[];const add=(ok,title,detail)=>{rows.push({ok,title,detail});paint();};
+  const paint=()=>{box.innerHTML=rows.map(r=>`<div style="display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--border);">
+      <div style="font-size:16px;">${r.ok===true?'✅':r.ok==='warn'?'⚠️':r.ok==='info'?'ℹ️':'❌'}</div>
+      <div style="flex:1;min-width:0;"><div style="font-size:14px;color:var(--text);">${esc(r.title)}</div>${r.detail?`<div style="font-size:12px;color:var(--text3);line-height:1.6;white-space:pre-wrap;">${esc(r.detail)}</div>`:''}</div></div>`).join('').replace('border-top:1px solid var(--border);','')+(healthBusy?'<div class="rec-empty" style="padding:12px;">檢查中…</div>':'');};
+  paint();
+  // Notion 權杖
+  try{await notionAPI('GET','/users/me');add(true,'Notion 連線正常');}catch(e){add(false,'Notion 連不上',e.message);}
+  // 資料庫與欄位
+  for(const db of DB_SPECS){
+    try{
+      const d=await notionAPI('GET',`/databases/${db.id()}`);const props=d.properties||{};
+      const miss=[],wrong=[];
+      Object.entries(db.need).forEach(([k,types])=>{if(!props[k])miss.push(k);else if(!types.includes(props[k].type))wrong.push(`${k}（現在是 ${props[k].type}）`);});
+      if(!Object.values(props).some(p=>p.type==='title')) miss.push('標題欄位');
+      const optMiss=db.opt?Object.keys(db.opt).filter(k=>!props[k]):[];
+      if(miss.length||wrong.length) add(false,`${db.name}：欄位有問題`,[miss.length?`缺少欄位：${miss.join('、')}`:'',wrong.length?`類型不對：${wrong.join('、')}`:''].filter(Boolean).join('\n'));
+      else add(optMiss.length?'warn':true,`${db.name}`,optMiss.length?`選用欄位還沒建（相關功能會略過）：${optMiss.join('、')}`:'');
+    }catch(e){add(false,`${db.name}：讀不到`,/404/.test(e.message)?'這個資料庫還沒「連接」爵士鼓教學系統，或已被刪除':e.message);}
+  }
+  // 日曆
+  const cals=[[GCAL_ID,'課程日曆'],[CHECKIN_CAL_ID,'打卡紀錄日曆'],[SHIFT_CAL,'泰順排班（老闆的行事曆）'],[HOLIDAY_CAL,'台灣國定假日']];
+  if(!gcalValid()) await ensureGcal();
+  if(!gcalValid()) add(false,'Google 日曆未連接','到設定 → 連線與同步 → Google 日曆按「連接」');
+  else{
+    add(true,gRT?'Google 日曆已連接・長期登入':'Google 日曆已連接（約一小時需重新連接）',gRT?'':'按設定頁的「啟用長期登入」可以免去每小時重新連接');
+    for(const [id,name] of cals){try{await gcal('GET','/events',null,[['maxResults','1']],id);add(true,name);}catch(e){add(false,`${name}：讀不到`,e.message);}}
+    if(!reminderEv) add('info','每日填紀錄提醒：已關閉');
+  }
+  // 資料檢查
+  try{
+    const rows2=await querySalary();
+    const bad=rows2.filter(r=>r.type==='入帳'&&(!r.date||!r.amount));
+    add(bad.length?'warn':true,bad.length?`薪資紀錄有 ${bad.length} 筆收款沒填日期或金額`:'薪資紀錄資料完整',bad.map(r=>r.name).slice(0,8).join('\n'));
+  }catch(e){}
+  const dups=dupRecords().length;add(dups?'warn':true,dups?`有 ${dups} 筆重複的上課紀錄`:'沒有重複的上課紀錄',dups?'設定 → 連線與同步 →「清除重複的上課紀錄」':'');
+  const weeklyBad=students.filter(s=>s.status==='正常上課'&&!isBooking(s)&&(!s.day||!s.time||!s.room));
+  add(weeklyBad.length?'warn':true,weeklyBad.length?`${weeklyBad.length} 位每週固定的學生缺少星期、時間或教室`:'學生資料完整',weeklyBad.map(s=>s.name).join('、'));
+  const setPl=Object.keys(placeCoords).length;add(setPl===PLACES.length?true:'info',`教室位置已設定 ${setPl}／${PLACES.length}`,setPl<PLACES.length?`還沒設定：${PLACES.filter(p=>!placeCoords[p]).join('、')}（自動打卡不會觸發）`:'');
+  add('info',`最近一次備份：${lastBackup||'還沒備份過'}`);
+  healthBusy=false;paint();
+}
+
+// ══════════ 資料備份 ══════════
+let lastBackup='';
+async function exportBackup(){
+  showToast('📦 整理備份資料中…');
+  try{
+    const data={app:"阿森's Web",version:APP_VERSION,exportedAt:new Date().toISOString(),students,records,songs,todos};
+    data.salary=await querySalary().catch(()=>[]);
+    data.placeRules=placeRules||await loadPlaceRules().then(()=>placeRules).catch(()=>null);
+    data.changes=(await queryAll(DB_CHANGES).catch(()=>[])).map(p=>({id:p.id,name:gp(p,'名稱','title'),date:p.properties?.['日期']?.date||null,type:gp(p,'類型','select'),student:gp(p,'學生','rich_text'),place:gp(p,'地點','select'),note:gp(p,'說明','rich_text'),calId:gp(p,'日曆ID','rich_text')}));
+    if(gcalValid()){
+      const from=addDays(twToday(),-730),to=addDays(twToday(),365);
+      data.checkins=(await gcalAll([['privateExtendedProperty','kind=checkin'],['timeMin',twISO(from,'00:00')],['timeMax',twISO(to,'00:00')],['singleEvents','true'],['maxResults','2500']],CHECKIN_CAL_ID).catch(()=>[])).filter(e=>e.status!=='cancelled').map(e=>({start:e.start.dateTime,end:e.end.dateTime,...(e.extendedProperties?.private||{})}));
+      data.calendarExceptions=(await gcalAll([['timeMin',twISO(from,'00:00')],['timeMax',twISO(to,'00:00')],['singleEvents','true'],['maxResults','2500']]).catch(()=>[]))
+        .filter(e=>e.status!=='cancelled'&&(e.extendedProperties?.private?.state||e.extendedProperties?.private?.kind==='booking'||e.extendedProperties?.private?.kind==='sub'||e.extendedProperties?.private?.kind==='teacherLeave'||e.extendedProperties?.private?.moved))
+        .map(e=>({id:e.id,summary:e.summary,start:e.start,end:e.end,private:e.extendedProperties?.private||{}}));
+    }
+    const blob=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`阿森Web備份_${twToday()}.json`;
+    document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);
+    lastBackup=twToday();
+    try{await saveFormSetting(true);}catch(e){}
+    showToast('✅ 備份完成，檔案已下載');
+    if(curPage==='home') renderHome();if(curPage==='settings') renderSettings();
+  }catch(e){showToast('❌ 備份失敗：'+e.message);}
+}
+function backupAlertHtml(){
+  if(!NOTION_TOKEN||!settingsLoaded) return '';
+  const ym=twToday().slice(0,7);
+  if(lastBackup&&lastBackup.slice(0,7)===ym) return '';
+  return`<div style="background:var(--card);border:1px solid rgba(90,169,230,0.6);border-radius:12px;padding:10px 12px;margin:0 16px 10px;display:flex;align-items:center;gap:8px;">
+    <div style="flex:1;min-width:0;font-size:13px;color:#7fbef0;font-weight:700;">📦 這個月還沒備份資料<div style="font-size:11px;color:var(--text3);font-weight:400;">${lastBackup?`上次備份 ${lastBackup.replace(/-/g,'/')}`:'還沒備份過'}</div></div>
+    <button class="add-rec-btn" onclick="exportBackup()">備份</button></div>`;
+}
+
+// ══════════ 首頁區塊顯示設定 ══════════
+const HOME_SECTIONS=[['stat-row','統計數字'],['checkin-card','打卡'],['cmd-box','指令框'],['todo-home','待辦事項'],['unrec-card','今日課程']];
+let homeHide={};try{homeHide=JSON.parse(localStorage.getItem('home_hide')||'{}');}catch(e){}
+function toggleHomeSection(id){homeHide[id]=!homeHide[id];try{localStorage.setItem('home_hide',JSON.stringify(homeHide));}catch(e){}applyHomeHide();if(curPage==='settings')renderSettings();}
+function applyHomeHide(){HOME_SECTIONS.forEach(([id])=>{const el=document.getElementById(id);if(el)el.style.display=homeHide[id]?'none':'';});}
+
 function renderChangelog(){
   markSeen();
   document.getElementById('changelog-wrap').innerHTML=CHANGELOG.map((c,i)=>`<div class="rec-card" style="padding:12px 14px;margin-bottom:10px;">
@@ -3828,15 +3962,16 @@ async function renderSubs(){
 // ══════════ 設定頁 ══════════
 let formTime='23:30',formOn=true,setStats={};
 function settingsPrivate(){
-  const pr={kind:'settings',formTime,formOn:formOn?'1':'0'};
+  const pr={kind:'settings',formTime,formOn:formOn?'1':'0',lastBackup:lastBackup||''};
   PLACES.forEach((p,i)=>{if(placeCoords[p])pr['p'+i]=`${placeCoords[p].lat.toFixed(6)},${placeCoords[p].lng.toFixed(6)}`;});
   return pr;
 }
-async function saveFormSetting(){
+async function saveFormSetting(silent){
   try{
     const pr=settingsPrivate();
     if(settingsEv) settingsEv=await ck('PATCH',`/events/${settingsEv.id}`,{extendedProperties:{private:pr}});
     else settingsEv=await ck('POST','/events',{summary:'⚙️ 打卡設定（請勿刪除）',start:{date:'2020-01-01'},end:{date:'2020-01-02'},transparency:'transparent',extendedProperties:{private:pr}});
+    if(silent) return;
     await syncFormReminder(twToday());showToast(formOn?`✅ 泰順時數提醒 ${formTime}`:'已關閉泰順時數提醒');
   }catch(e){showToast('❌ '+e.message);}
   if(curPage==='settings') renderSettings();
@@ -3872,6 +4007,7 @@ function renderSettings(){
   h+=setGroup('薪資',
     setRow('💰','薪資紀錄',setStats.sal!=null?`${mNum} 月應領 ${money(setStats.sal)}`:'每月應領、收款、歷年表格',"showPage('salary')")+
     setRow('💵','計薪規則',placeRules&&placeRules.length?`${rulePlaces().length} 個地點・時薪與發薪日`:'各教室時薪、發薪日、調薪紀錄',"showPage('rules')"));
+  h+=setGroup('首頁',HOME_SECTIONS.map(([id,name])=>setRow(homeHide[id]?'▫️':'▪️',name,homeHide[id]?'已隱藏':'顯示中',null,`<button onclick="toggleHomeSection('${id}')" style="${smallBtn(homeHide[id]?'var(--text3)':'var(--accent)')}">${homeHide[id]?'隱藏':'顯示'}</button>`)).join(''));
   h+=setGroup('提醒',
     setRow('📝','填寫上課紀錄・每日提醒',remOn?`每天 ${remT}・當天都寫完就不通知`:'已關閉',null,
       `<div style="display:flex;gap:6px;align-items:center;">${timeInput('reminder-time',remT,"if(reminderEv)setReminder(this.value)")}<button onclick="toggleReminder()" style="${smallBtn(remOn?'var(--accent)':'var(--text3)')}">${remOn?'開':'關'}</button></div>`)+
@@ -3884,6 +4020,8 @@ function renderSettings(){
       g?`<div style="display:flex;gap:6px;">${gRT?'':`<button class="add-rec-btn" onclick="gcalConnect()">啟用長期登入</button>`}<button id="sync-all-btn" style="${smallBtn('var(--text2)')}" onclick="syncAll()" ${syncBusy?'disabled':''}>${syncBusy?'同步中…':'同步全部'}</button></div>`:`<button class="add-rec-btn" onclick="gcalConnect()">連接</button>`)+
     setRow('📤','打卡同步到 Notion','把本月打卡補進 Notion',null,`<button style="${smallBtn('var(--text2)')}" onclick="settingsSyncChecks()">${ckSyncText||'同步本月'}</button>`)+
     setRow('📤','課程異動同步到 Notion','請假、停課、調課、補課、代課',null,`<button id="ch-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncChangesToNotion()">${chSyncText||'全部同步'}</button>`)+
+    setRow('📦','匯出備份',lastBackup?`上次 ${lastBackup.replace(/-/g,'/')}・建議每月一次`:'還沒備份過・建議每月一次',null,`<button class="add-rec-btn" onclick="exportBackup()">備份</button>`)+
+    setRow('🩺','系統檢查','檢查資料庫、欄位、日曆和資料',"showPage('health')")+
     setRow('🔑','更換 Notion 權杖','權杖重新產生後使用','changeToken()')+
     (dupRecords().length?setRow('🧹','清除重複的上課紀錄',`${dupRecords().length} 筆重複`,null,`<button style="${smallBtn('var(--text2)')}" onclick="cleanDupRecords()">清除</button>`):'')+
     (records.some(r=>(r.note||'').trim())?setRow('🔀','合併舊紀錄的其他事項',`${records.filter(r=>(r.note||'').trim()).length} 筆紀錄還分開存`,null,`<button style="${smallBtn('var(--text2)')}" onclick="mergeOldNotes()">合併</button>`):''));
@@ -4089,7 +4227,7 @@ async function refreshAll(){
   refreshing=true;showToast('🔄 更新中…');
   try{
     weekKey=null;weekCache={};todayKey=null;
-    await Promise.all([loadStudents(),loadRecords(),loadSongs(),loadTodos()]);
+    await Promise.all([loadStudents(),loadRecords(),loadSongs(),loadTodos()]);saveCache();
     if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);autoCheckin(true);}
     if(curPage==='home') renderHome();
     showToast('✅ 已更新');
@@ -4107,7 +4245,7 @@ function showPage(id){
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
   {const hb=document.getElementById('header-bell');if(hb)hb.style.display=id==='home'?'':'none';}
-const titles={feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
+const titles={health:'系統檢查',feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
@@ -4125,6 +4263,7 @@ const titles={feed:'最新動態',help:'操作教學',rules:'計薪規則',chang
   if(id==='changelog') renderChangelog();
   if(id==='rules') renderRules();
   if(id==='feed') renderFeed();
+  if(id==='health') runHealth();
   if(id==='help'){helpQuery='';document.getElementById('help-wrap').innerHTML='';renderHelp();}
   if(id==='rooms') renderHome();
   if(id==='schedule'){renderSchedule();if(!navFromPop){window.scrollTo(0,0);scheduleScrollPending=true;requestAnimationFrame(()=>requestAnimationFrame(scrollScheduleToNow));}}
@@ -4158,7 +4297,8 @@ function renderHome(){
   document.getElementById('gcal-banner').innerHTML=gcalBannerHtml();
   document.getElementById('home-version').innerHTML=`<span style="cursor:pointer;text-decoration:underline dotted;" onclick="showPage('changelog')">版本 ${APP_VERSION}</span>`;
   document.getElementById('update-banner').innerHTML=updateBannerHtml();
-  document.getElementById('alerts').innerHTML=NOTION_TOKEN?(gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'')+todoAlertHtml():'';
+  document.getElementById('alerts').innerHTML=NOTION_TOKEN?(gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'')+todoAlertHtml()+backupAlertHtml():'';
+  applyHomeHide();
   document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
   document.getElementById('todo-home').innerHTML=NOTION_TOKEN?todoHomeHtml():'';
   const cb=document.getElementById('cmd-box');
@@ -4780,6 +4920,11 @@ function updateDays(){
   document.getElementById('stu-day').innerHTML=rc.days.map(d=>`<option>${d}</option>`).join('');
 }
 
+function readCache(){try{const c=JSON.parse(localStorage.getItem('web_cache')||'null');return c&&c.v===1?c:null;}catch(e){return null;}}
+function saveCache(){
+  try{localStorage.setItem('web_cache',JSON.stringify({v:1,at:Date.now(),students,records,songs,todos}));}
+  catch(e){try{localStorage.setItem('web_cache',JSON.stringify({v:1,at:Date.now(),students,records:records.slice(0,300),songs,todos}));}catch(e2){}}
+}
 async function init(){
   gcalInit();
   // 如果沒有 Token，顯示輸入畫面
@@ -4803,10 +4948,18 @@ async function init(){
     document.getElementById('gcal-banner').innerHTML='';
     return;
   }
-  document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
+  const cached=readCache();
+  if(cached){
+    // 先顯示上次的資料，背景再更新
+    students=cached.students||[];records=cached.records||[];songs=cached.songs||[];todos=cached.todos||[];
+    try{renderHome();}catch(e){console.warn(e);}
+  }else document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
   try{
     await Promise.all([loadStudents(),loadRecords(),loadSongs(),loadTodos()]);
+    saveCache();
     renderHome();
+    if(curPage==='students') renderStudents();
+    if(curPage==='detail'&&curStudent) renderDetail(curStudent);
     await ensureGcal();
     if(gcalValid()){await Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]);renderHome();autoCheckin(true);}
     showToast('✅ 已連接 Notion');
