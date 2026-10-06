@@ -748,6 +748,16 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
   </div>
 </div>
 
+<!-- COVER SHEET -->
+<div class="overlay" id="sheet-cover">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">🧑‍🏫 代課安排</div>
+    <div class="sheet-body" id="cover-body"></div>
+    <div class="sheet-footer"><button class="btn-cancel" style="flex:1;" onclick="closeSheet('sheet-cover')">完成</button></div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -988,8 +998,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-4';
+const APP_VERSION='2026.10.07-5';
 const CHANGELOG=[
+  {v:'2026.10.07-5',items:['老師請假後可以「代課安排」：依教室填上代課老師，那幾堂改成「🧑‍🏫 某某代課」，不算你的薪水、也不算學生請假','一鍵產生代課交接單：每位學生的上課時間、上一堂內容和狀況、點歌、待辦，直接貼給代課老師','還沒人代的課維持老師停課，之後隨時可以改']},
   {v:'2026.10.07-4',items:['學生頁不再計算待補課，只顯示請假次數','首頁「待辦」改名「待辦事項」','最新動態新增「待辦事項」分頁，列出已完成的項目和完成時間','學生篩選「約課制」和「體驗」合併成「約課制/體驗」']},
   {v:'2026.10.07-3',items:['泰順H14 排班連動：讀取老闆的行事曆，只認標題「林似儒」或「阿森」的行程（只讀不寫）','課表、今日課程、匯出課表都會顯示泰順H14 的班','有班的日子，人在泰順附近會自動打卡，下班時間自動帶入表定時間，不用按下班；有班沒打卡會提醒']},
   {v:'2026.10.07-2',items:['可以自己新增待辦：首頁待辦區和學生頁的「＋」，或指令框「小明 待辦 印譜」','新增個人待辦（不屬於學生），例如「待辦 買鼓棒 10/10」','選了學生，期限會自動設成他的下一堂課']},
@@ -1333,10 +1344,11 @@ function evName(ev){
 async function markEvent(ev,state,reason){
   const pr={...(ev.extendedProperties?.private||{}),state:state||''};
   pr.reason=state==='leave'?String(reason||'').slice(0,200):'';
+  pr.coverTeacher=state==='covered'?String(reason||'').slice(0,60):'';
   const name=evName(ev);
   const body={...ev};
   delete body.colorId;
-  body.summary=state==='leave'?`🚫 ${name}（請假）`:state==='teacherOff'?`⛔ ${name}（老師停課）`:state==='absent'?`🚷 ${name}（曠課）`:`🥁 ${name}`;
+  body.summary=state==='leave'?`🚫 ${name}（請假）`:state==='teacherOff'?`⛔ ${name}（老師停課）`:state==='absent'?`🚷 ${name}（曠課）`:state==='covered'?`🧑‍🏫 ${name}（${pr.coverTeacher}代課）`:`🥁 ${name}`;
   if(state) body.colorId='8';
   body.transparency=state?'transparent':'opaque';
   body.extendedProperties={...(ev.extendedProperties||{}),private:pr};
@@ -1393,7 +1405,8 @@ function renderChanges(){
 function changeRow(e){
   const p=evParts(e.start.dateTime);const pr=e.extendedProperties?.private||{};const st=evState(e);
   let icon,text,btn='';
-  if(st==='absent'){icon='🚷';text='曠課・照常計薪';btn=`<button onclick="restoreLeave('${e.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;}
+  if(st==='covered'){icon='🧑‍🏫';text=`${esc(pr.coverTeacher||'')}代課（老師請假）`;}
+  else if(st==='absent'){icon='🚷';text='曠課・照常計薪';btn=`<button onclick="restoreLeave('${e.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;}
   else if(st==='leave'){icon='🚫';text='請假'+(pr.reason?'・'+esc(pr.reason):'');btn=`<button onclick="restoreLeave('${e.id}')" style="${smallBtn('var(--text3)')}">恢復</button>`;}
   else if(st==='teacherOff'){icon='⛔';text='老師停課';}
   else if(pr.moved==='1'){
@@ -1412,7 +1425,7 @@ function lessonRow(ev){
   const pr=ev.extendedProperties?.private||{};const st=evState(ev);
   const isB=pr.kind==='booking',isMk=pr.makeup==='1';
   const isPast=new Date(ev.end.dateTime).getTime()<Date.now();
-  let label=(isPast?'已過・':'')+(st==='absent'?'🚷 曠課（照常計薪）':st==='leave'?'🚫 請假'+(pr.reason?'・'+esc(pr.reason):''):st==='teacherOff'?'⛔ 老師停課':isMk?'補課':pr.logged==='1'?'補登':isB?'約課':'固定課');
+  let label=(isPast?'已過・':'')+(st==='covered'?`🧑‍🏫 ${esc(pr.coverTeacher||'')}代課`:st==='absent'?'🚷 曠課（照常計薪）':st==='leave'?'🚫 請假'+(pr.reason?'・'+esc(pr.reason):''):st==='teacherOff'?'⛔ 老師停課':isMk?'補課':pr.logged==='1'?'補登':isB?'約課':'固定課');
   if(pr.moved==='1'&&!st){
     const o=ev.originalStartTime?.dateTime||pr.origStart;
     label+=(pr.fromOff==='1'?'・停課改期':'・已調課')+(o?`（原 ${fmtMD(evParts(o).date).split(' ')[0]} ${evParts(o).hhmm}）`:'');
@@ -1508,7 +1521,7 @@ async function renderLeaves(){
             <div style="font-size:14px;font-weight:700;color:var(--text);">🏖 ${fmtMD(days[0])}${days.length>1?' – '+fmtMD(days[days.length-1]):''}</div>
             <div style="font-size:11px;color:var(--text3);">${days.length} 天${pr.note?' · '+pr.note:''} · 停課 ${parseInt(pr.count||'0')} 堂</div>
           </div>
-          <button onclick="cancelLeave('${e.id}')" style="${smallBtn('var(--accent)')}">取消請假</button></div>`;
+          <div style="display:flex;gap:6px;flex-shrink:0;"><button onclick="openCover('${e.id}')" style="${smallBtn('#9b8cff')}">代課安排</button><button onclick="cancelLeave('${e.id}')" style="${smallBtn('var(--accent)')}">取消請假</button></div></div>`;
       })||`<div class="rec-empty">還沒有請假紀錄</div>`;
     }else{
       const d=await gcal('GET','/events',null,[['privateExtendedProperty','state=leave'],['timeMin',YEARS2_AGO()],['timeMax',YEAR_AHEAD()],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]);
@@ -1778,7 +1791,7 @@ function cancelLeave(evId){
       const ids=Object.keys(pr).filter(k=>/^r\d+$/.test(k)).sort((a,b)=>a.slice(1)-b.slice(1)).flatMap(k=>pr[k].split(',')).filter(Boolean);
       let fail=0;
       for(const id of ids){try{
-        if(pr.mode==='mark'){const x=await gcal('GET',`/events/${id}`);if(x&&evState(x)==='teacherOff')await markEvent(x,'');}
+        if(pr.mode==='mark'){const x=await gcal('GET',`/events/${id}`);if(x&&['teacherOff','covered'].includes(evState(x)))await markEvent(x,'');}
         else await gcal('PATCH',`/events/${id}`,{status:'confirmed'});
       }catch(e){fail++;}}
       await gcal('DELETE',`/events/${evId}`);chDelete(`${evId}|老師請假`);
@@ -3054,7 +3067,7 @@ async function syncDailyReminder(){
 
 // ══════════ 課程異動同步到 Notion「課程異動」資料庫 ══════════
 const DB_CHANGES='3edd68e58caf80c798d5eb935f177c03'; // 「課程異動」資料庫
-const CH_TYPES={leave:'學生請假',teacherOff:'老師停課',absent:'曠課'};
+const CH_TYPES={leave:'學生請假',teacherOff:'老師停課',absent:'曠課',covered:'他人代課'};
 async function chUpsert(key,o){
   if(!DB_CHANGES) return;
   try{
@@ -3092,8 +3105,8 @@ async function chLesson(ev,type){
   });
 }
 async function chAfterMark(ev,state){
-  if(state) await chLesson(ev,CH_TYPES[state]);
-  else{await chDelete(`${ev.id}|學生請假`);await chDelete(`${ev.id}|老師停課`);await chDelete(`${ev.id}|曠課`);}
+  if(state){for(const t of Object.values(CH_TYPES)) if(t!==CH_TYPES[state]) await chDelete(`${ev.id}|${t}`);await chLesson(ev,CH_TYPES[state]);}
+  else{await chDelete(`${ev.id}|學生請假`);await chDelete(`${ev.id}|老師停課`);await chDelete(`${ev.id}|曠課`);await chDelete(`${ev.id}|他人代課`);}
 }
 async function chTeacherLeave(ev){
   if(!ev||!ev.start?.date) return;
@@ -3211,6 +3224,8 @@ const HELP=[
   ['老師請假','首頁「＋ 請假」，選日期和事由。期間的課會變成「⛔ 老師停課」，不算學生請假、不需補課；期間也無法排課。'],
   ['停課改期','老師停課的課可以按「調課」改到其他日期，會恢復成正常上課。'],
   ['取消請假','設定 → 請假紀錄 → 我的請假 →「取消請假」，停課的課會全部恢復。'],
+  ['代課安排','請假後老闆安排好代課老師，到設定 → 請假紀錄 → 我的請假 →「代課安排」，在每間教室填上老師名字按「套用」。那幾堂改成他人代課，不算你的薪水。'],
+  ['交接單','代課安排裡每位代課老師都有「📋 交接單」按鈕，整理好每位學生上一堂的進度、狀況、點歌和待辦，複製後直接傳給老師。'],
   ['重新套用','請假之後才新增的學生或改時間的課，系統會自動補標停課；如果發現漏掉，在「我的請假」按「重新套用」。'],
  ]},
  {t:'🔁 代課與 🌱 體驗課',items:[
@@ -3565,6 +3580,89 @@ async function saveTodoNew(){
   await createTodos(sid,lines,null,due);
   showToast(`✅ 已新增 ${lines.length} 項待辦`);
   if(curPage==='home') renderHome();if(curPage==='detail'&&sid) renderDetail(sid);
+}
+
+// ══════════ 老師請假：安排代課老師、產生交接單 ══════════
+let coverLeave=null,coverLessons=[];
+async function openCover(levId){
+  try{
+    coverLeave=await gcal('GET',`/events/${levId}`);
+    document.getElementById('cover-body').innerHTML='<div class="rec-empty">讀取中…</div>';
+    document.getElementById('sheet-cover').classList.add('show');
+    await loadCoverLessons();renderCover();
+  }catch(e){showToast('❌ '+e.message);}
+}
+async function loadCoverLessons(){
+  const days=leaveDays(coverLeave);
+  const d=await gcal('GET','/events',null,[['timeMin',twISO(days[0],'00:00')],['timeMax',twISO(addDays(days[days.length-1],1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]);
+  coverLessons=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&e.extendedProperties?.private?.studentId&&['teacherOff','covered'].includes(evState(e)));
+}
+function renderCover(){
+  const by={};
+  coverLessons.forEach(e=>{const p=lessonPlace(e)||'其他';(by[p]=by[p]||[]).push(e);});
+  const days=leaveDays(coverLeave);
+  let h=`<div style="font-size:12px;color:var(--text3);margin:-6px 0 12px;line-height:1.6;">${fmtMD(days[0])}${days.length>1?' – '+fmtMD(days[days.length-1]):''}・老闆安排好代課老師後，在對應的教室填上名字。沒人代的維持「老師停課」。</div>`;
+  if(!coverLessons.length) h+=`<div class="rec-empty">這段期間沒有課</div>`;
+  Object.entries(by).forEach(([pl,list])=>{
+    const teachers=[...new Set(list.filter(e=>evState(e)==='covered').map(e=>e.extendedProperties.private.coverTeacher||''))].filter(Boolean);
+    const key=pl.replace(/[^\w\u4e00-\u9fff]/g,'');
+    h+=`<div class="rec-card" style="padding:12px;margin-bottom:10px;">
+      <div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:8px;">${esc(pl.replace(' Yamaha',''))}<span style="font-size:12px;font-weight:400;color:var(--text3);">・${list.length} 堂</span></div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input class="form-input" id="cv-${key}" style="flex:1;margin:0;padding:7px 10px;font-size:13px;" placeholder="代課老師名字" value="${esc(teachers[0]||'')}">
+        <button class="add-rec-btn" onclick="applyCover('${esc(pl)}','cv-${key}')">套用</button>
+      </div>
+      ${list.map(e=>{const p=evParts(e.start.dateTime);const st=evState(e);const t=e.extendedProperties.private.coverTeacher;
+        return`<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid var(--border);">
+          <div style="flex:1;min-width:0;color:var(--text2);">${fmtMD(p.date)} ${p.hhmm} ${esc(evName(e))}</div>
+          <div style="color:${st==='covered'?'#9b8cff':'var(--text3)'};white-space:nowrap;">${st==='covered'?'🧑‍🏫 '+esc(t||'')+' 代課':'⛔ 停課'}</div></div>`;}).join('')}
+      ${teachers.length?`<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${teachers.map(t=>`<button style="${smallBtn('var(--accent)')}" onclick="copyHandover('${esc(pl)}','${esc(t)}')">📋 ${esc(t)} 的交接單</button>`).join('')}<button style="${smallBtn('var(--text3)')}" onclick="applyCover('${esc(pl)}',null)">改回停課</button></div>`:''}
+    </div>`;
+  });
+  document.getElementById('cover-body').innerHTML=h;
+}
+async function applyCover(place,inputId){
+  const teacher=inputId?document.getElementById(inputId).value.trim():'';
+  if(inputId&&!teacher){showToast('請輸入代課老師名字');return;}
+  const list=coverLessons.filter(e=>(lessonPlace(e)||'其他')===place);
+  let n=0;
+  for(const e of list){
+    try{
+      if(teacher){if(evState(e)!=='covered'||e.extendedProperties.private.coverTeacher!==teacher){await markEvent(e,'covered',teacher);n++;}}
+      else if(evState(e)==='covered'){await markEvent(e,'teacherOff');n++;}
+    }catch(err){console.warn(err);}
+  }
+  weekKey=null;weekCache={};todayKey=null;
+  showToast(teacher?`✅ ${place.replace(' Yamaha','')} ${n} 堂由 ${teacher} 代課`:`已改回老師停課`);
+  await loadCoverLessons();renderCover();
+}
+function handoverText(place,teacher){
+  const list=coverLessons.filter(e=>(lessonPlace(e)||'其他')===place&&evState(e)==='covered'&&e.extendedProperties.private.coverTeacher===teacher)
+    .sort((a,b)=>a.start.dateTime<b.start.dateTime?-1:1);
+  const out=[`${teacher}老師您好，這是 ${place.replace(' Yamaha','')} 的代課學生進度，謝謝您！`,''];
+  let curDay='';
+  list.forEach(e=>{
+    const p=evParts(e.start.dateTime);const sid=e.extendedProperties.private.studentId;const s=students.find(x=>x.id===sid);
+    if(p.date!==curDay){if(curDay)out.push('');curDay=p.date;out.push(`【${fmtMD(p.date)}】`);}
+    const dur=Math.round((new Date(e.end.dateTime)-new Date(e.start.dateTime))/60000);
+    out.push(`${p.hhmm} ${s?s.name:evName(e)}（${dur}分）`);
+    const last=sid?lastRecordBefore(sid,p.date):null;
+    if(last){
+      out.push(`・上次 ${mdShort(last.date)}：${(last.content||'（沒有內容）').replace(/\n+/g,'／')}`);
+      const st=[last.status,last.note].filter(Boolean).join('／').replace(/\n+/g,'／');
+      if(st) out.push(`・狀況：${st}`);
+    }else out.push('・還沒有上課紀錄');
+    const sg=songs.filter(x=>x.sid===sid&&x.status!=='學會了');
+    if(sg.length) out.push(`・點歌：${sg.map(x=>x.name+(x.status==='練習中'?'（練習中）':'')).join('、')}`);
+    const td=todos.filter(t=>t.sid===sid);
+    if(td.length) out.push(`・待辦：${td.map(t=>t.text).join('、')}`);
+  });
+  return out.join('\n');
+}
+async function copyHandover(place,teacher){
+  const t=handoverText(place,teacher);
+  try{await navigator.clipboard.writeText(t);showToast(`✅ 已複製 ${teacher} 的交接單`);}
+  catch(e){document.getElementById('cover-body').insertAdjacentHTML('afterbegin',`<pre style="white-space:pre-wrap;background:var(--card2);border-radius:10px;padding:10px;font-size:13px;color:var(--text);user-select:text;-webkit-user-select:text;">${esc(t)}</pre>`);showToast('請長按上方文字複製');}
 }
 
 function renderChangelog(){
@@ -4177,7 +4275,7 @@ function renderSchedule(){
       box-sizing:border-box;
       ${layered?'box-shadow:-3px 0 6px rgba(0,0,0,0.45);':''}
     ">
-      <div style="font-size:11px;font-weight:700;color:${state?'var(--text3)':layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${state?'text-decoration:line-through;':''}">${state==='leave'?'🚫':state==='teacherOff'?'⛔':state==='absent'?'🚷':isTrial(s)?'🌱':''}${s.name}</div>
+      <div style="font-size:11px;font-weight:700;color:${state?'var(--text3)':layered||n>1?'var(--text)':rc.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${state&&state!=='covered'?'text-decoration:line-through;':''}">${state==='covered'?'🧑‍🏫':state==='leave'?'🚫':state==='teacherOff'?'⛔':state==='absent'?'🚷':isTrial(s)?'🌱':''}${s.name}</div>
       ${heightPx>30?`<div style="font-size:${dayMode?11:9}px;color:var(--text3);line-height:1.3;white-space:nowrap;overflow:hidden;">${norm}${dur!==60?` ${dur}分`:''}${dayMode?`・${esc((s.room||'').replace(' Yamaha',''))}${state==='leave'?'・請假':state==='teacherOff'?'・老師停課':booking?'・約課/補課':''}`:''}</div>`:''}
     </div>`;
   }).join('');
