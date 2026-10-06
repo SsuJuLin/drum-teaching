@@ -998,8 +998,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-5';
+const APP_VERSION='2026.10.07-6';
 const CHANGELOG=[
+  {v:'2026.10.07-6',items:['待辦事項快到期時，首頁上方會出現提醒卡片：明天要用的是黃色，今天要用或已過期是紅色，卡片上可以直接勾完成','期限前一天 12:00 由 Google 日曆跳手機通知「⏰ 明天要用：…」，完成後自動取消']},
   {v:'2026.10.07-5',items:['老師請假後可以「代課安排」：依教室填上代課老師，那幾堂改成「🧑‍🏫 某某代課」，不算你的薪水、也不算學生請假','一鍵產生代課交接單：每位學生的上課時間、上一堂內容和狀況、點歌、待辦，直接貼給代課老師','還沒人代的課維持老師停課，之後隨時可以改']},
   {v:'2026.10.07-4',items:['學生頁不再計算待補課，只顯示請假次數','首頁「待辦」改名「待辦事項」','最新動態新增「待辦事項」分頁，列出已完成的項目和完成時間','學生篩選「約課制」和「體驗」合併成「約課制/體驗」']},
   {v:'2026.10.07-3',items:['泰順H14 排班連動：讀取老闆的行事曆，只認標題「林似儒」或「阿森」的行程（只讀不寫）','課表、今日課程、匯出課表都會顯示泰順H14 的班','有班的日子，人在泰順附近會自動打卡，下班時間自動帶入表定時間，不用按下班；有班沒打卡會提醒']},
@@ -1085,7 +1086,7 @@ function gcalConnect(){
 }
 function gcalClear(){gToken=null;gExp=0;try{localStorage.removeItem('gcal_token');}catch(e){}}
 function onGcalChange(){
-  if(curPage==='home') Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]).then(()=>{renderHome();autoCheckin(true);});
+  if(curPage==='home') Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]).then(()=>{renderHome();autoCheckin(true);syncTodoReminders();});
   if(curPage==='leaves') renderLeaves();
   if(curPage==='schedule') renderSchedule();
   if(curPage==='detail'&&curStudent) renderDetail(curStudent);
@@ -3190,7 +3191,8 @@ const HELP=[
   ['點歌狀態','點「想學／練習中」切換狀態；學會了按「✅ 完成」，會收進「已學會」，需要時可以點開恢復。按 ✎ 可以修改或刪除。'],
   ['待辦','寫上課紀錄時在「待辦」欄一行打一項，例如「印掉了的譜」。期限自動設成那位學生的下一堂課。'],
   ['新增待辦','首頁待辦區或學生頁按「＋」；也可以用指令框「小明 待辦 印譜」。不選學生就是個人待辦，例如「待辦 買鼓棒 10/10」。'],
-  ['完成待辦','首頁或學生頁的待辦，勾左邊的方框就完成。明天要上課的是黃色，過期是紅色。'],
+  ['完成待辦','首頁或學生頁的待辦，勾左邊的方框就完成。'],
+  ['快到期提醒','期限前一天，首頁上方會出現黃色卡片「⏰ 明天要用」，當天或過期變紅色；前一天 12:00 手機也會收到通知。通知在「打卡紀錄」日曆，手機的 Google 日曆要勾選顯示並允許通知。'],
  ]},
  {t:'🔔 最新動態',items:[
   ['在哪裡','首頁標題卡右上角的鈴鐺。'],
@@ -3506,6 +3508,7 @@ async function loadTodos(){
   try{const sc=await getSchema(DB_TODOS);const tk=titleKey(sc,'內容');
     todos=(await queryAll(DB_TODOS,{filter:{property:'完成',checkbox:{equals:false}}})).map(p=>({id:p.id,text:gp(p,tk,'title'),sid:gp(p,'學生','relation'),due:gp(p,'期限','date')||''}));}
   catch(e){console.warn('todos',e.message);todos=[];}
+  syncTodoReminders();
 }
 async function nextLessonDate(sid,afterDate){
   try{
@@ -3525,7 +3528,7 @@ async function createTodos(sid,lines,fromDate,dueOverride){
 async function doneTodo(id){
   const t=todos.find(x=>x.id===id);todos=todos.filter(x=>x.id!==id);
   if(curPage==='home') renderHome();if(curPage==='detail'&&t) renderDetail(t.sid);
-  try{await notionAPI('PATCH',`/pages/${id}`,{properties:{'完成':{checkbox:true}}});showToast('✅ 完成');}
+  try{await notionAPI('PATCH',`/pages/${id}`,{properties:{'完成':{checkbox:true}}});showToast('✅ 完成');syncTodoReminders();}
   catch(e){if(t)todos.push(t);showToast('❌ '+e.message);if(curPage==='home')renderHome();}
 }
 function todoRow(t,showName){
@@ -3538,7 +3541,8 @@ function todoRow(t,showName){
     <div style="font-size:11px;color:${col};">${showName?(s?esc(s.name):'個人')+'・':''}${t.sid?when:(t.due?(t.due<td?`已過期・${fmtMD(t.due)}`:`期限 ${fmtMD(t.due)}`):'沒有期限')}</div></div></div>`;
 }
 function todoHomeHtml(){
-  const list=[...todos].sort((a,b)=>(a.due||'9999')<(b.due||'9999')?-1:1);
+  const tm=addDays(twToday(),1);
+  const list=[...todos].filter(t=>!(t.due&&t.due<=tm)).sort((a,b)=>(a.due||'9999')<(b.due||'9999')?-1:1);
   return`<div style="margin:0 16px 10px;"><div style="display:flex;align-items:center;margin-bottom:6px;"><div class="sec-line" style="margin:0;"><div class="section-title">待辦事項</div><div class="rec-count">・${list.length} 項</div></div>
       <button class="add-rec-btn" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="openTodoNew()">＋</button></div>
     ${list.length?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:2px 12px 4px;">${list.map(t=>todoRow(t,true)).join('').replace('border-top:1px solid var(--border);','')}</div>`:''}</div>`;
@@ -3663,6 +3667,52 @@ async function copyHandover(place,teacher){
   const t=handoverText(place,teacher);
   try{await navigator.clipboard.writeText(t);showToast(`✅ 已複製 ${teacher} 的交接單`);}
   catch(e){document.getElementById('cover-body').insertAdjacentHTML('afterbegin',`<pre style="white-space:pre-wrap;background:var(--card2);border-radius:10px;padding:10px;font-size:13px;color:var(--text);user-select:text;-webkit-user-select:text;">${esc(t)}</pre>`);showToast('請長按上方文字複製');}
+}
+
+// ══════════ 待辦快到期：首頁提醒（A）＋前一天 12:00 手機通知（B）══════════
+const TODO_REMIND_TIME='12:00';
+function todoAlertHtml(){
+  const td=twToday(),tm=addDays(td,1);
+  const due=todos.filter(t=>t.due&&t.due<=tm).sort((a,b)=>a.due<b.due?-1:1);
+  if(!due.length) return '';
+  return due.map(t=>{
+    const s=students.find(x=>x.id===t.sid);const late=t.due<=td;
+    const col=late?'var(--red)':'#c8a84a';const bd=late?'rgba(196,106,106,0.6)':'rgba(200,168,74,0.6)';
+    const lab=t.due<td?`⚠️ 已過期（${fmtMD(t.due)}）`:t.due===td?'⚠️ 今天要用':'⏰ 明天要用';
+    return`<div style="background:var(--card);border:1px solid ${bd};border-radius:12px;padding:10px 12px;margin:0 16px 10px;display:flex;align-items:center;gap:10px;">
+      <button onclick="doneTodo('${t.id}')" aria-label="完成" style="width:22px;height:22px;flex-shrink:0;border-radius:6px;border:1.5px solid ${col};background:none;cursor:pointer;"></button>
+      <div style="flex:1;min-width:0;"><div style="font-size:12px;color:${col};font-weight:700;">${lab}</div>
+      <div style="font-size:14px;color:var(--text);">${esc(t.text)}<span style="font-size:12px;color:var(--text3);">・${s?esc(s.name):'個人'}</span></div></div></div>`;
+  }).join('');
+}
+let trBusy=false,trAgain=false;
+async function syncTodoReminders(){
+  if(trBusy){trAgain=true;return;}
+  if(!gcalValid()) return;
+  trBusy=true;trAgain=false;
+  try{
+    const now=Date.now();
+    const want={};
+    todos.filter(t=>t.due).forEach(t=>{
+      const at=new Date(twISO(addDays(t.due,-1),TODO_REMIND_TIME)).getTime();
+      if(at>now)(want[t.due]=want[t.due]||[]).push(t);
+    });
+    const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=todoReminder'],['timeMin',new Date(now-86400000).toISOString()],['singleEvents','true'],['maxResults','100']]);
+    const have=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+    for(const e of have){
+      const due=e.extendedProperties?.private?.due;
+      if(!want[due]){if(new Date(e.start.dateTime).getTime()>now) await ck('DELETE',`/events/${e.id}`);continue;}
+    }
+    for(const [due,list] of Object.entries(want)){
+      const names=list.map(t=>{const s=students.find(x=>x.id===t.sid);return `${t.text}（${s?s.name:'個人'}）`;});
+      const summary=`⏰ 明天要用：${names.join('、')}`.slice(0,200);
+      const start=twISO(addDays(due,-1),TODO_REMIND_TIME);
+      const ex=have.find(e=>e.extendedProperties?.private?.due===due);
+      if(ex){if(ex.summary!==summary) await ck('PATCH',`/events/${ex.id}`,{summary});}
+      else await ck('POST','/events',{summary,description:names.join('\n'),start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,10),timeZone:'Asia/Taipei'},transparency:'transparent',reminders:{useDefault:false,overrides:[{method:'popup',minutes:0}]},extendedProperties:{private:{kind:'todoReminder',due}}});
+    }
+  }catch(e){console.warn('todoReminders',e.message);}
+  finally{trBusy=false;if(trAgain){trAgain=false;setTimeout(syncTodoReminders,300);}}
 }
 
 function renderChangelog(){
@@ -4108,7 +4158,7 @@ function renderHome(){
   document.getElementById('gcal-banner').innerHTML=gcalBannerHtml();
   document.getElementById('home-version').innerHTML=`<span style="cursor:pointer;text-decoration:underline dotted;" onclick="showPage('changelog')">版本 ${APP_VERSION}</span>`;
   document.getElementById('update-banner').innerHTML=updateBannerHtml();
-  document.getElementById('alerts').innerHTML=NOTION_TOKEN&&gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'';
+  document.getElementById('alerts').innerHTML=NOTION_TOKEN?(gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'')+todoAlertHtml():'';
   document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
   document.getElementById('todo-home').innerHTML=NOTION_TOKEN?todoHomeHtml():'';
   const cb=document.getElementById('cmd-box');
