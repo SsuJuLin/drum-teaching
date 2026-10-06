@@ -238,6 +238,7 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
       <div class="header-title" id="header-title">首頁</div>
       <div class="header-sub" id="header-date"></div>
     </div>
+    <button id="header-cmd" onclick="openCmd()" aria-label="指令" style="position:absolute;left:14px;bottom:12px;background:none;border:none;color:var(--text2);cursor:pointer;padding:6px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></button>
     <button id="header-bell" onclick="showPage('feed')" aria-label="最新動態" style="position:absolute;right:14px;bottom:12px;background:none;border:none;color:var(--text2);cursor:pointer;padding:6px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg></button>
   </div>
   <!-- 漂浮按鈕 -->
@@ -763,6 +764,16 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
   </div>
 </div>
 
+<!-- COMMAND SHEET -->
+<div class="overlay" id="sheet-cmd">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">⌨️ 指令</div>
+    <div class="sheet-body" id="cmd-sheet-body" style="padding-bottom:6px;"></div>
+    <div class="sheet-footer"><button class="btn-cancel" style="flex:1;" onclick="closeSheet('sheet-cmd')">關閉</button></div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -1020,8 +1031,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-7';
+const APP_VERSION='2026.10.07-8';
 const CHANGELOG=[
+  {v:'2026.10.07-8',items:['課表上的泰順班改成顯示「泰順」','指令框從首頁移到標題列左邊的 ⌨️ 按鈕，任何頁面都能打開，完成後自動關閉']},
   {v:'2026.10.07-7',items:['大量操作（老師請假、同步、匯入）不會再因為 Notion 速度限制而默默漏資料，會自動等待重試','打開網站先顯示上次的資料，背景再更新，幾乎不用等','設定頁新增「🩺 系統檢查」：逐項檢查資料庫、欄位、日曆和資料問題','設定頁新增「📦 匯出備份」；每月 1 號起，首頁會提醒直到當月完成備份','設定頁新增「首頁」區，可以隱藏不常用的首頁區塊']},
   {v:'2026.10.07-6',items:['待辦事項快到期時，首頁上方會出現提醒卡片：明天要用的是黃色，今天要用或已過期是紅色，卡片上可以直接勾完成','期限前一天 12:00 由 Google 日曆跳手機通知「⏰ 明天要用：…」，完成後自動取消']},
   {v:'2026.10.07-5',items:['老師請假後可以「代課安排」：依教室填上代課老師，那幾堂改成「🧑‍🏫 某某代課」，不算你的薪水、也不算學生請假','一鍵產生代課交接單：每位學生的上課時間、上一堂內容和狀況、點歌、待辦，直接貼給代課老師','還沒人代的課維持老師停課，之後隨時可以改']},
@@ -2103,10 +2115,17 @@ async function confirmCommand(){
     }
     cmdPending=null;weekKey=null;weekCache={};todayKey=null;
     document.getElementById('cmd-input').value='';
-    out.innerHTML=cmdMsg('✅ 完成');setTimeout(()=>{if(!cmdPending&&out)out.innerHTML='';},2500);
+    out.innerHTML=cmdMsg('✅ 完成');setTimeout(()=>{if(!cmdPending){if(out)out.innerHTML='';closeSheet('sheet-cmd');}},1200);
     showToast('✅ 已更新日曆');
     await loadToday();if(curPage==='home') renderHome();
   }catch(e){out.innerHTML=cmdMsg(e.message,true);}
+}
+function openCmd(){
+  if(!NOTION_TOKEN) return;
+  const b=document.getElementById('cmd-sheet-body');
+  b.innerHTML=gcalValid()?cmdBoxHtml():`<div class="rec-empty">請先連接 Google 日曆<br><button class="add-rec-btn" style="margin-top:10px;" onclick="gcalConnect()">連接</button></div>`;
+  document.getElementById('sheet-cmd').classList.add('show');
+  setTimeout(()=>{const i=document.getElementById('cmd-input');if(i)i.focus();},250);
 }
 function cmdBoxHtml(){
   if(!gcalValid()) return '';
@@ -3216,7 +3235,7 @@ const HELP=[
   ['今日課程','列出今天要上的課。點某一堂會展開上一堂的完整紀錄，按「＋ 新增紀錄（帶入上次內容）」就能接著寫。'],
   ['提醒區','有課沒打卡、昨天還沒寫紀錄、記得填泰順時數，有事才會出現，點了直接去處理。'],
   ['打卡','一行顯示今天的打卡。沒打卡時按「＋ 📍 打卡」：人在已設定的教室附近會直接打卡，否則打開手動打卡。'],
-  ['指令框','用打字完成請假、調課、補課等，詳見「指令框」這一節。'],
+  ['指令框','標題列左邊的 ⌨️，任何頁面都能打開，用打字完成請假、調課、補課等，詳見「指令框」這一節。'],
   ['重新整理','點底部的首頁圖示，會重新抓取 Notion 和日曆的最新資料。'],
   ['＋ 請假','右下角按鈕是「老師請假」，學生請假要到學生頁或用指令框。'],
  ]},
@@ -3844,7 +3863,7 @@ function backupAlertHtml(){
 }
 
 // ══════════ 首頁區塊顯示設定 ══════════
-const HOME_SECTIONS=[['stat-row','統計數字'],['checkin-card','打卡'],['cmd-box','指令框'],['todo-home','待辦事項'],['unrec-card','今日課程']];
+const HOME_SECTIONS=[['stat-row','統計數字'],['checkin-card','打卡'],['todo-home','待辦事項'],['unrec-card','今日課程']];
 let homeHide={};try{homeHide=JSON.parse(localStorage.getItem('home_hide')||'{}');}catch(e){}
 function toggleHomeSection(id){homeHide[id]=!homeHide[id];try{localStorage.setItem('home_hide',JSON.stringify(homeHide));}catch(e){}applyHomeHide();if(curPage==='settings')renderSettings();}
 function applyHomeHide(){HOME_SECTIONS.forEach(([id])=>{const el=document.getElementById(id);if(el)el.style.display=homeHide[id]?'none':'';});}
@@ -4301,9 +4320,7 @@ function renderHome(){
   applyHomeHide();
   document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
   document.getElementById('todo-home').innerHTML=NOTION_TOKEN?todoHomeHtml():'';
-  const cb=document.getElementById('cmd-box');
-  if(!NOTION_TOKEN||!gcalValid()) cb.innerHTML='';
-  else if(!document.getElementById('cmd-input')) cb.innerHTML=cmdBoxHtml();
+  document.getElementById('cmd-box').innerHTML='';
   document.getElementById('classroom-list').innerHTML=CLASSROOMS.map(c=>{
     const cnt=students.filter(s=>s.room===c.name).length;
     return`<div class="classroom-row" onclick="openClassroom('${c.name}')">
@@ -4397,7 +4414,7 @@ function renderSchedule(){
     (weekShifts||[]).forEach(sh=>{
       const p=evParts(sh.start);const dur=Math.round((new Date(sh.end)-new Date(sh.start))/60000)||60;
       const st=Math.max(p.min,START_H*60);if(st>=END_H*60) return;
-      evs.push({s:{id:'',name:SHIFT_LABEL,room:SHIFT_PLACE,shift:true},dayIdx:(p.dow+6)%7,norm:p.hhmm,dur:Math.min(dur,END_H*60-st),st,en:Math.min(p.min+dur,END_H*60),booking:false,state:''});
+      evs.push({s:{id:'',name:'泰順',room:SHIFT_PLACE,shift:true},dayIdx:(p.dow+6)%7,norm:p.hhmm,dur:Math.min(dur,END_H*60-st),st,en:Math.min(p.min+dur,END_H*60),booking:false,state:''});
     });
   }else if(weekOffset===0&&!useCal){
     activeStudents.filter(s=>!isBooking(s)).forEach(s=>{
