@@ -274,6 +274,10 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
     <div class="page" id="page-settings">
       <div style="padding:4px 16px 24px;" id="settings-wrap"></div>
     </div>
+    <div class="page" id="page-gym">
+      <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
+      <div style="padding:0 16px 24px;" id="gym-wrap"></div>
+    </div>
     <div class="page" id="page-health">
       <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
       <div style="padding:0 16px 24px;"><div class="rec-card" style="padding:4px 14px;" id="health-wrap"></div>
@@ -774,6 +778,27 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
   </div>
 </div>
 
+<!-- GYM SHEET -->
+<div class="overlay" id="sheet-gym">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="gym-title">🏋️ 補登健身</div>
+    <div class="sheet-body">
+      <div class="form-group"><label class="form-label">日期</label><input class="form-input" type="date" id="gym-date"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">到</label><input class="form-input" type="time" id="gym-start"></div>
+        <div class="form-group"><label class="form-label">走</label><input class="form-input" type="time" id="gym-end"></div>
+      </div>
+      <div class="form-group"><label class="form-label">備註（選填）</label><input class="form-input" id="gym-note" placeholder="例：腿、有氧"></div>
+      <button id="gym-del" class="btn-cancel" style="width:100%;color:var(--red);" onclick="deleteGym()">刪除這筆</button>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="closeSheet('sheet-gym')">取消</button>
+      <button class="btn-save" onclick="saveGymEdit()">✅ 儲存</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM DIALOG -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
@@ -1031,8 +1056,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-9';
+const APP_VERSION='2026.10.07-10';
 const CHANGELOG=[
+  {v:'2026.10.07-10',items:['在課表看其他週時，再按一次底部日曆圖示會回到本週（Day 模式回到今天），並捲到現在時間','新增「🏋️ 健身紀錄」（設定 → 紀錄）：開始／結束一鍵記錄、手動補登、每月次數和時數，存在 Notion，不放日曆','設定健身房位置後，人到健身房打開網站就會自動開始計時；健身中首頁會顯示「結束」按鈕']},
   {v:'2026.10.07-9',items:['課表上的泰順班不再顯示分鐘數','返回上一頁的手勢更好用：除了從最左邊緣滑，也可以在畫面上明確往右滑（課表、打卡紀錄、薪資頁除外）']},
   {v:'2026.10.07-8',items:['課表上的泰順班改成顯示「泰順」','指令框從首頁移到標題列左邊的 ⌨️ 按鈕，任何頁面都能打開，完成後自動關閉']},
   {v:'2026.10.07-7',items:['大量操作（老師請假、同步、匯入）不會再因為 Notion 速度限制而默默漏資料，會自動等待重試','打開網站先顯示上次的資料，背景再更新，幾乎不用等','設定頁新增「🩺 系統檢查」：逐項檢查資料庫、欄位、日曆和資料問題','設定頁新增「📦 匯出備份」；每月 1 號起，首頁會提醒直到當月完成備份','設定頁新增「首頁」區，可以隱藏不常用的首頁區塊']},
@@ -1349,6 +1375,7 @@ function shiftWeek(n){
 const SWIPE_PAGES={
   schedule:{wrap:'schedule-wrap',go:d=>shiftWeek(d)},
   checkins:{wrap:'checkins-wrap',go:d=>shiftCkMonth(d)},
+  gym:{wrap:'gym-wrap',go:d=>shiftGymMonth(d)},
   salary:{wrap:'salary-wrap',go:d=>{if(salaryView==='month')shiftSalary(d);}},
 };
 (function(){
@@ -2443,6 +2470,7 @@ async function loadCheckinSettings(){
     PLACES.forEach((p,i)=>{const v=pr['p'+i];if(v){const[a,b]=v.split(',').map(Number);if(!isNaN(a))placeCoords[p]={lat:a,lng:b};}});
     if(pr.formTime) formTime=pr.formTime;
     if(pr.lastBackup) lastBackup=pr.lastBackup;
+    if(pr.gym){const[a,b]=pr.gym.split(',').map(Number);if(!isNaN(a))gymLoc={lat:a,lng:b};}
     settingsLoaded=true;
     if(pr.formOn) formOn=pr.formOn!=='0';
   }catch(e){console.error(e);}
@@ -2510,12 +2538,17 @@ function getPos(){
 }
 let nearPlace=null,autoBusy=false,lastAuto=0;
 async function autoCheckin(force){
-  if(autoBusy||!gcalValid()||!Object.keys(placeCoords).length) return;
+  if(autoBusy||!gcalValid()||(!Object.keys(placeCoords).length&&!gymLoc)) return;
   if(!force&&Date.now()-lastAuto<5*60000) return;
   autoBusy=true;lastAuto=Date.now();
   try{
     if(todayChecksKey!==twToday()) await loadTodayChecks();
     const pos=await getPos();
+    if(gymLoc&&distM(pos,gymLoc)<=150+Math.min(pos.acc||0,150)){
+      if(gymRows===null) await loadGym();
+      const today=twToday();
+      if(!gymOpen()&&!(gymRows||[]).some(r=>evParts(r.start).date===today&&r.end&&Date.now()-new Date(r.end).getTime()<2*3600000)) await gymStart(true);
+    }
     nearPlace=null;
     let best=null;
     Object.entries(placeCoords).forEach(([p,c])=>{const d=distM(pos,c);if(d<=300+Math.min(pos.acc||0,200)&&(!best||d<best.d))best={p,d};});
@@ -3256,6 +3289,7 @@ const HELP=[
   ['待辦事項','已完成的待辦和完成時間，新增的不會列出。'],
  ]},
  {t:'📅 課表',items:[
+  ['回到本週','在課表看其他週時，再按一次底部的日曆圖示，就會回到本週並捲到現在時間。'],
   ['切換週／日','右上「Week」切換成「Day」只看一天，再按切回整週。左右滑動或按 ‹ › 換到上一週／下一週（Day 模式是前一天／後一天）。'],
   ['紅線','今天現在的時間，進入課表會自動捲到紅線附近。'],
   ['標示','實線框＝固定課；虛線框＝約課／補課；灰色劃線＝請假或老師停課；金色＝代課；🌱＝體驗課；日期紅底＝國定假日，藍底＝補班日。'],
@@ -3327,6 +3361,12 @@ const HELP=[
  {t:'🔔 提醒',items:[
   ['填寫上課紀錄','每天固定時間由 Google 日曆通知；當天的課都寫完了就不會通知。時間在設定頁調整。'],
   ['收不到通知','手機的 Google 日曆 App 要勾選顯示「阿森Asen｜工作&爵士鼓教學系統」和「打卡紀錄」兩個日曆，並允許通知。'],
+ ]},
+ {t:'🏋️ 健身紀錄',items:[
+  ['在哪裡','設定 → 紀錄 →「健身紀錄」。'],
+  ['記錄','按「開始健身」記下到的時間，結束時按「結束」。健身中首頁上方會一直顯示「🏋️ 健身中」和結束按鈕。'],
+  ['自動開始','在健身房按「設定健身房位置」，之後人在健身房附近打開網站，就會自動開始計時。結束還是要按。'],
+  ['補登與修改','「＋ 手動補登」或點某一筆修改、刪除。'],
  ]},
  {t:'⚙️ 同步與設定',items:[
   ['Google 日曆','每台裝置登入一次就長期有效。顯示「已斷線」時按「連接」。'],
@@ -3869,6 +3909,113 @@ let homeHide={};try{homeHide=JSON.parse(localStorage.getItem('home_hide')||'{}')
 function toggleHomeSection(id){homeHide[id]=!homeHide[id];try{localStorage.setItem('home_hide',JSON.stringify(homeHide));}catch(e){}applyHomeHide();if(curPage==='settings')renderSettings();}
 function applyHomeHide(){HOME_SECTIONS.forEach(([id])=>{const el=document.getElementById(id);if(el)el.style.display=homeHide[id]?'none':'';});}
 
+// ══════════ 健身紀錄（Notion，不放日曆）══════════
+const DB_GYM='3f2d68e58caf8016b7cbc84367698fbe';
+let gymRows=null,gymLoc=null,gymMonthOff=0;
+async function loadGym(){
+  try{
+    const pages=await queryAll(DB_GYM,{sorts:[{property:'日期',direction:'descending'}]});
+    gymRows=pages.map(p=>{const d=p.properties?.['日期']?.date||{};return{id:p.id,start:d.start||'',end:d.end||'',note:gp(p,'備註','rich_text'),hrs:gp(p,'時數','number')};}).filter(r=>r.start);
+  }catch(e){console.warn('gym',e.message);gymRows=gymRows||[];}
+}
+function gymOpen(){return (gymRows||[]).find(r=>r.start&&!r.end&&Date.now()-new Date(r.start).getTime()<12*3600000);}
+function gymProps(startIso,endIso,note){
+  const p={'名稱':{title:[{text:{content:`${mdShort(evParts(startIso).date)} 健身`}}]},'日期':{date:{start:startIso,end:endIso||null}}};
+  if(endIso) p['時數']={number:Math.round((new Date(endIso)-new Date(startIso))/360000)/10};
+  if(note!==undefined) p['備註']={rich_text:note?[{text:{content:note}}]:[]};
+  return p;
+}
+async function gymStart(auto){
+  if(gymOpen()){showToast('已經在健身中');return;}
+  try{
+    await notionAPI('POST','/pages',{parent:{database_id:DB_GYM},properties:gymProps(isoTW(Date.now()))});
+    await loadGym();showToast(auto?`🏋️ 到健身房了，已開始計時 ${hhmmOf(Date.now())}`:`🏋️ 開始健身 ${hhmmOf(Date.now())}`);
+  }catch(e){showToast('❌ '+e.message);}
+  if(curPage==='home') renderHome();if(curPage==='gym') renderGym();
+}
+async function gymEnd(){
+  const o=gymOpen();if(!o)return;
+  try{
+    const end=isoTW(Date.now());
+    await notionAPI('PATCH',`/pages/${o.id}`,{properties:gymProps(o.start,end)});
+    await loadGym();showToast(`✅ 健身結束・${((new Date(end)-new Date(o.start))/3600000).toFixed(1)}h`);
+  }catch(e){showToast('❌ '+e.message);}
+  if(curPage==='home') renderHome();if(curPage==='gym') renderGym();
+}
+function gymAlertHtml(){
+  const o=gymOpen();if(!o) return '';
+  const mins=Math.round((Date.now()-new Date(o.start).getTime())/60000);
+  return`<div style="background:var(--card);border:1px solid rgba(155,140,255,0.55);border-radius:12px;padding:10px 12px;margin:0 16px 10px;display:flex;align-items:center;gap:8px;">
+    <div style="flex:1;min-width:0;font-size:13px;color:#b3a8ff;font-weight:700;">🏋️ 健身中<div style="font-size:11px;color:var(--text3);font-weight:400;">${evParts(o.start).hhmm} 開始・已經 ${Math.floor(mins/60)?Math.floor(mins/60)+' 小時 ':''}${mins%60} 分</div></div>
+    <button class="add-rec-btn" onclick="gymEnd()">結束</button></div>`;
+}
+function shiftGymMonth(n){gymMonthOff+=n;renderGym();}
+async function renderGym(){
+  const wrap=document.getElementById('gym-wrap');
+  if(gymRows===null){wrap.innerHTML='<div class="rec-empty">讀取中…</div>';await loadGym();}
+  const td=twToday();let y=parseInt(td.slice(0,4)),m=parseInt(td.slice(5,7))+gymMonthOff;
+  while(m<1){m+=12;y--;}while(m>12){m-=12;y++;}
+  const ym=`${y}-${String(m).padStart(2,'0')}`;
+  const list=(gymRows||[]).filter(r=>evParts(r.start).date.startsWith(ym));
+  const done=list.filter(r=>r.end);const hrs=done.reduce((a,r)=>a+(new Date(r.end)-new Date(r.start))/3600000,0);
+  const o=gymOpen();
+  const nb='background:var(--card);border:1px solid var(--border2);color:var(--text2);border-radius:14px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit;';
+  let h=`<div class="rec-card" style="padding:14px;margin-bottom:12px;text-align:center;">
+    ${o?`<div style="font-size:13px;color:#b3a8ff;margin-bottom:8px;">🏋️ 健身中・${evParts(o.start).hhmm} 開始</div><button class="add-rec-btn" style="padding:10px 28px;font-size:15px;" onclick="gymEnd()">結束</button>`
+      :`<button class="add-rec-btn" style="padding:10px 28px;font-size:15px;" onclick="gymStart()">🏋️ 開始健身</button>`}
+    <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+      <button style="${smallBtn('var(--text2)')}" onclick="openGymEdit()">＋ 手動補登</button>
+      <button style="${smallBtn('var(--text2)')}" onclick="setGymHere()">📍 ${gymLoc?'重設':'設定'}健身房位置</button></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px;">${gymLoc?'已設定位置：人在健身房附近打開網站，會自動開始計時':'設定位置後，人到健身房打開網站就會自動開始計時'}</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <button style="${nb}" onclick="shiftGymMonth(-1)">‹</button>
+    <div style="flex:1;text-align:center;font-size:15px;font-weight:800;color:var(--text);">${y} 年 ${m} 月</div>
+    <button style="${nb}" onclick="shiftGymMonth(1)">›</button></div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:10px;">本月 <b style="color:var(--text);">${list.length}</b> 次・共 <b style="color:var(--text);">${hrs.toFixed(1)}</b> 小時${done.length?`・平均 ${(hrs/done.length).toFixed(1)} 小時`:''}</div>`;
+  h+=list.length?list.map(r=>{const a=evParts(r.start);const b=r.end?evParts(r.end):null;
+    return`<div class="rec-card" onclick="openGymEdit('${r.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;">
+      <div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:700;color:var(--text);">${fmtMD(a.date)}</div>
+      <div style="font-size:12px;color:var(--text3);">${a.hhmm}–${b?b.hhmm:'進行中'}${b?`・${((new Date(r.end)-new Date(r.start))/3600000).toFixed(1)}h`:''}${r.note?'・'+esc(r.note):''}</div></div>
+      <div style="color:var(--text3);">›</div></div>`;}).join(''):`<div class="rec-empty">這個月還沒有健身紀錄</div>`;
+  wrap.innerHTML=h;
+}
+let gymEditId=null;
+function openGymEdit(id){
+  gymEditId=id||null;const r=id?(gymRows||[]).find(x=>x.id===id):null;
+  document.getElementById('gym-title').textContent=r?'🏋️ 修改健身紀錄':'🏋️ 補登健身';
+  document.getElementById('gym-date').value=r?evParts(r.start).date:twToday();
+  document.getElementById('gym-start').value=r?evParts(r.start).hhmm:'19:00';
+  document.getElementById('gym-end').value=r&&r.end?evParts(r.end).hhmm:(r?'':'20:30');
+  document.getElementById('gym-note').value=r?r.note||'':'';
+  document.getElementById('gym-del').style.display=r?'':'none';
+  document.getElementById('sheet-gym').classList.add('show');
+}
+async function saveGymEdit(){
+  const ds=document.getElementById('gym-date').value,a=document.getElementById('gym-start').value,b=document.getElementById('gym-end').value;
+  const note=document.getElementById('gym-note').value.trim();
+  if(!ds||!a){showToast('請填日期和開始時間');return;}
+  const st=twISO(ds,a);let en=b?twISO(ds,b):null;
+  if(en&&new Date(en)<=new Date(st)) en=twISO(addDays(ds,1),b);
+  try{
+    if(gymEditId) await notionAPI('PATCH',`/pages/${gymEditId}`,{properties:gymProps(st,en,note)});
+    else await notionAPI('POST','/pages',{parent:{database_id:DB_GYM},properties:gymProps(st,en,note)});
+    closeSheet('sheet-gym');showToast('✅ 已儲存');await loadGym();renderGym();
+  }catch(e){showToast('❌ '+e.message);}
+}
+function deleteGym(){
+  if(!gymEditId)return;
+  showConfirm('刪除健身紀錄','確定刪除這筆紀錄？',async()=>{
+    try{await notionAPI('PATCH',`/pages/${gymEditId}`,{archived:true});closeSheet('sheet-gym');await loadGym();renderGym();if(curPage==='home')renderHome();}
+    catch(e){showToast('❌ '+e.message);}
+  });
+}
+async function setGymHere(){
+  showToast('📡 取得位置中…');
+  try{const pos=await getPos();gymLoc={lat:pos.lat,lng:pos.lng};await saveFormSetting(true);showToast(`✅ 健身房位置已設定（誤差約 ${Math.round(pos.acc)} 公尺）`);renderGym();}
+  catch(e){showToast('❌ '+e.message);}
+}
+
 function renderChangelog(){
   markSeen();
   document.getElementById('changelog-wrap').innerHTML=CHANGELOG.map((c,i)=>`<div class="rec-card" style="padding:12px 14px;margin-bottom:10px;">
@@ -3983,6 +4130,7 @@ async function renderSubs(){
 let formTime='23:30',formOn=true,setStats={};
 function settingsPrivate(){
   const pr={kind:'settings',formTime,formOn:formOn?'1':'0',lastBackup:lastBackup||''};
+  if(gymLoc) pr.gym=`${gymLoc.lat.toFixed(6)},${gymLoc.lng.toFixed(6)}`;
   PLACES.forEach((p,i)=>{if(placeCoords[p])pr['p'+i]=`${placeCoords[p].lat.toFixed(6)},${placeCoords[p].lng.toFixed(6)}`;});
   return pr;
 }
@@ -4022,6 +4170,7 @@ function renderSettings(){
     setRow('🏖','請假紀錄','我的請假・學生請假',"showPage('leaves')")+
     setRow('🔁','代課紀錄',setStats.sub!=null?`本月 ${setStats.sub} 堂`:'代課與代課紀錄',"showPage('subs')")+
     setRow('📝','待寫紀錄','昨天、今天的上課紀錄',"showPage('todo')")+
+    setRow('🏋️','健身紀錄',gymRows?(()=>{const ym=twToday().slice(0,7);const l=gymRows.filter(r=>evParts(r.start).date.startsWith(ym));const h=l.filter(r=>r.end).reduce((a,r)=>a+(new Date(r.end)-new Date(r.start))/3600000,0);return `本月 ${l.length} 次・${h.toFixed(1)}h`;})():'去健身房的時間',"showPage('gym')")+
     setRow('📍','教室','四間教室的學生與上課日',"showPage('rooms')")+
     setRow('📋','版本紀錄',`目前 ${APP_VERSION}`,"showPage('changelog')"));
   h+=setGroup('薪資',
@@ -4256,6 +4405,7 @@ async function refreshAll(){
 }
 let navFromPop=false;
 function showPage(id){
+  if(id===curPage&&!navFromPop&&id==='schedule'){weekOffset=0;if(schedMode==='day')schedDay=twToday();}
   if(!navFromPop&&id!==curPage){
     try{history.pushState({page:id,sid:id==='detail'?curStudent:null,from:detailFrom},'');}catch(e){}
   }
@@ -4265,7 +4415,7 @@ function showPage(id){
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
   {const hb=document.getElementById('header-bell');if(hb)hb.style.display=id==='home'?'':'none';}
-const titles={health:'系統檢查',feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
+const titles={gym:'健身紀錄',health:'系統檢查',feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
@@ -4284,6 +4434,7 @@ const titles={health:'系統檢查',feed:'最新動態',help:'操作教學',rule
   if(id==='rules') renderRules();
   if(id==='feed') renderFeed();
   if(id==='health') runHealth();
+  if(id==='gym') renderGym();
   if(id==='help'){helpQuery='';document.getElementById('help-wrap').innerHTML='';renderHelp();}
   if(id==='rooms') renderHome();
   if(id==='schedule'){renderSchedule();if(!navFromPop){window.scrollTo(0,0);scheduleScrollPending=true;requestAnimationFrame(()=>requestAnimationFrame(scrollScheduleToNow));}}
@@ -4317,7 +4468,7 @@ function renderHome(){
   document.getElementById('gcal-banner').innerHTML=gcalBannerHtml();
   document.getElementById('home-version').innerHTML=`<span style="cursor:pointer;text-decoration:underline dotted;" onclick="showPage('changelog')">版本 ${APP_VERSION}</span>`;
   document.getElementById('update-banner').innerHTML=updateBannerHtml();
-  document.getElementById('alerts').innerHTML=NOTION_TOKEN?(gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'')+todoAlertHtml()+backupAlertHtml():'';
+  document.getElementById('alerts').innerHTML=NOTION_TOKEN?(gcalValid()?missingCheckinHtml()+ydMissHtml()+formCardHtml():'')+gymAlertHtml()+todoAlertHtml()+backupAlertHtml():'';
   applyHomeHide();
   document.getElementById('checkin-card').innerHTML=NOTION_TOKEN?checkinHtml():'';
   document.getElementById('todo-home').innerHTML=NOTION_TOKEN?todoHomeHtml():'';
@@ -4978,7 +5129,7 @@ async function init(){
     try{renderHome();}catch(e){console.warn(e);}
   }else document.getElementById('stat-row').innerHTML=`<div class="loading" style="grid-column:1/-1;"><div class="spinner"></div><div>連接 Notion…</div></div>`;
   try{
-    await Promise.all([loadStudents(),loadRecords(),loadSongs(),loadTodos()]);
+    await Promise.all([loadStudents(),loadRecords(),loadSongs(),loadTodos(),loadGym()]);
     saveCache();
     renderHome();
     if(curPage==='students') renderStudents();
