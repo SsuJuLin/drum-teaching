@@ -1060,8 +1060,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-11';
+const APP_VERSION='2026.10.08-1';
 const CHANGELOG=[
+  {v:'2026.10.08-1',items:['最新動態的「打卡」分頁改名「地點」，健身工廠 中壢廠的健身紀錄也會一起列出','健身房統一顯示為「健身工廠 中壢廠」']},
   {v:'2026.10.07-11',items:['全自動打卡：搭配 iPhone 捷徑，抵達和離開教室、泰順、健身房時自動打卡或計時，不用打開網站（設定 → 打卡 → 全自動打卡）','全自動打的卡，打開網站時會自動同步到 Notion，泰順時數提醒也會排好']},
   {v:'2026.10.07-10',items:['在課表看其他週時，再按一次底部日曆圖示會回到本週（Day 模式回到今天），並捲到現在時間','新增「🏋️ 健身紀錄」（設定 → 紀錄）：開始／結束一鍵記錄、手動補登、每月次數和時數，存在 Notion，不放日曆','設定健身房位置後，人到健身房打開網站就會自動開始計時；健身中首頁會顯示「結束」按鈕']},
   {v:'2026.10.07-9',items:['課表上的泰順班不再顯示分鐘數','返回上一頁的手勢更好用：除了從最左邊緣滑，也可以在畫面上明確往右滑（課表、打卡紀錄、薪資頁除外）']},
@@ -3292,7 +3293,7 @@ const HELP=[
   ['在哪裡','首頁標題卡右上角的鈴鐺。'],
   ['行程','最近的請假、停課、調課、補課、代課、老師請假和新增學生，依時間排列。'],
   ['上課紀錄','最近新增或修改的上課紀錄，點了直接打開那篇。'],
-  ['打卡','最近一個月的打卡，點了可以修改。'],
+  ['地點','最近一個月去過的地方：教室、泰順的打卡，和健身工廠的健身紀錄，點了可以修改。'],
   ['待辦事項','已完成的待辦和完成時間，新增的不會列出。'],
  ]},
  {t:'📅 課表',items:[
@@ -3417,7 +3418,7 @@ async function renderFeed(){
   const tabs=`<div class="filter-scroll" style="padding:0 0 12px;">
     <div class="chip${feedTab==='sched'?' active':''}" onclick="setFeedTab('sched')">行程</div>
     <div class="chip${feedTab==='rec'?' active':''}" onclick="setFeedTab('rec')">上課紀錄</div>
-    <div class="chip${feedTab==='ck'?' active':''}" onclick="setFeedTab('ck')">打卡</div>
+    <div class="chip${feedTab==='ck'?' active':''}" onclick="setFeedTab('ck')">地點</div>
     <div class="chip${feedTab==='todo'?' active':''}" onclick="setFeedTab('todo')">待辦事項</div></div>`;
   wrap.innerHTML=tabs+`<div class="rec-empty">讀取中…</div>`;
   const tab=feedTab;
@@ -3443,6 +3444,13 @@ async function renderFeed(){
         const pr=e.extendedProperties?.private||{};const a=evParts(e.start.dateTime),b=evParts(e.end.dateTime);
         const hrs=((new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000).toFixed(1);
         return{at:e.start.dateTime,icon:'📍',title:`${(pr.place||'').replace(' Yamaha','')} ${a.hhmm}–${b.hhmm}`,sub:`${hrs}h・${pr.how||'打卡'}${pr.checkedOut==='1'?'・有按下班':''}`,click:`openCheckinEdit('${e.id}')`};
+      });
+      // 健身也一起列進「地點」
+      if(gymRows===null) await loadGym();
+      const since=addDays(twToday(),-31);
+      (gymRows||[]).filter(r=>evParts(r.start).date>=since).forEach(r=>{
+        const a=evParts(r.start);const b=r.end?evParts(r.end):null;
+        items.push({at:r.start,icon:'🏋️',title:`${GYM_NAME} ${a.hhmm}–${b?b.hhmm:'進行中'}`,sub:`${b?((new Date(r.end)-new Date(r.start))/3600000).toFixed(1)+'h・':''}健身${r.note?'・'+r.note:''}`,click:`openGymEdit('${r.id}')`});
       });
     }else{
       const d=await notionAPI('POST',`/databases/${DB_RECORDS}/query`,{sorts:[{timestamp:'last_edited_time',direction:'descending'}],page_size:50});
@@ -3919,6 +3927,7 @@ function applyHomeHide(){HOME_SECTIONS.forEach(([id])=>{const el=document.getEle
 
 // ══════════ 健身紀錄（Notion，不放日曆）══════════
 const DB_GYM='3f2d68e58caf8016b7cbc84367698fbe';
+const GYM_NAME='健身工廠 中壢廠';
 let gymRows=null,gymLoc=null,gymMonthOff=0;
 async function loadGym(){
   try{
@@ -3937,7 +3946,7 @@ async function gymStart(auto){
   if(gymOpen()){showToast('已經在健身中');return;}
   try{
     await notionAPI('POST','/pages',{parent:{database_id:DB_GYM},properties:gymProps(isoTW(Date.now()))});
-    await loadGym();showToast(auto?`🏋️ 到健身房了，已開始計時 ${hhmmOf(Date.now())}`:`🏋️ 開始健身 ${hhmmOf(Date.now())}`);
+    await loadGym();showToast(auto?`🏋️ 到${GYM_NAME}了，已開始計時 ${hhmmOf(Date.now())}`:`🏋️ 開始健身 ${hhmmOf(Date.now())}`);
   }catch(e){showToast('❌ '+e.message);}
   if(curPage==='home') renderHome();if(curPage==='gym') renderGym();
 }
@@ -3954,7 +3963,7 @@ function gymAlertHtml(){
   const o=gymOpen();if(!o) return '';
   const mins=Math.round((Date.now()-new Date(o.start).getTime())/60000);
   return`<div style="background:var(--card);border:1px solid rgba(155,140,255,0.55);border-radius:12px;padding:10px 12px;margin:0 16px 10px;display:flex;align-items:center;gap:8px;">
-    <div style="flex:1;min-width:0;font-size:13px;color:#b3a8ff;font-weight:700;">🏋️ 健身中<div style="font-size:11px;color:var(--text3);font-weight:400;">${evParts(o.start).hhmm} 開始・已經 ${Math.floor(mins/60)?Math.floor(mins/60)+' 小時 ':''}${mins%60} 分</div></div>
+    <div style="flex:1;min-width:0;font-size:13px;color:#b3a8ff;font-weight:700;">🏋️ 健身中・${GYM_NAME}<div style="font-size:11px;color:var(--text3);font-weight:400;">${evParts(o.start).hhmm} 開始・已經 ${Math.floor(mins/60)?Math.floor(mins/60)+' 小時 ':''}${mins%60} 分</div></div>
     <button class="add-rec-btn" onclick="gymEnd()">結束</button></div>`;
 }
 function shiftGymMonth(n){gymMonthOff+=n;renderGym();}
@@ -4026,7 +4035,7 @@ async function setGymHere(){
 
 // ══════════ 全自動打卡設定（iPhone 捷徑）══════════
 let autoKey='';
-const AUTO_PLACES=[['yangmei','楊梅宏音'],['linkou','林口星玥'],['neili','內壢奧莉琪'],['yiwen','藝文鹿納'],['taishun','泰順錄音室'],['gym','健身房']];
+const AUTO_PLACES=[['yangmei','楊梅宏音'],['linkou','林口星玥'],['neili','內壢奧莉琪'],['yiwen','藝文鹿納'],['taishun','泰順錄音室'],['gym',GYM_NAME]];
 function autoUrl(code,ev){return `${AUTH_WORKER}/auto?key=${autoKey}&place=${code}&event=${ev}`;}
 async function ensureAutoKey(){
   if(autoKey) return;
