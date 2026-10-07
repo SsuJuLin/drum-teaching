@@ -274,6 +274,10 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
     <div class="page" id="page-settings">
       <div style="padding:4px 16px 24px;" id="settings-wrap"></div>
     </div>
+    <div class="page" id="page-auto">
+      <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
+      <div style="padding:0 16px 24px;" id="auto-wrap"></div>
+    </div>
     <div class="page" id="page-gym">
       <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
       <div style="padding:0 16px 24px;" id="gym-wrap"></div>
@@ -1056,8 +1060,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.07-10';
+const APP_VERSION='2026.10.07-11';
 const CHANGELOG=[
+  {v:'2026.10.07-11',items:['全自動打卡：搭配 iPhone 捷徑，抵達和離開教室、泰順、健身房時自動打卡或計時，不用打開網站（設定 → 打卡 → 全自動打卡）','全自動打的卡，打開網站時會自動同步到 Notion，泰順時數提醒也會排好']},
   {v:'2026.10.07-10',items:['在課表看其他週時，再按一次底部日曆圖示會回到本週（Day 模式回到今天），並捲到現在時間','新增「🏋️ 健身紀錄」（設定 → 紀錄）：開始／結束一鍵記錄、手動補登、每月次數和時數，存在 Notion，不放日曆','設定健身房位置後，人到健身房打開網站就會自動開始計時；健身中首頁會顯示「結束」按鈕']},
   {v:'2026.10.07-9',items:['課表上的泰順班不再顯示分鐘數','返回上一頁的手勢更好用：除了從最左邊緣滑，也可以在畫面上明確往右滑（課表、打卡紀錄、薪資頁除外）']},
   {v:'2026.10.07-8',items:['課表上的泰順班改成顯示「泰順」','指令框從首頁移到標題列左邊的 ⌨️ 按鈕，任何頁面都能打開，完成後自動關閉']},
@@ -2470,6 +2475,7 @@ async function loadCheckinSettings(){
     PLACES.forEach((p,i)=>{const v=pr['p'+i];if(v){const[a,b]=v.split(',').map(Number);if(!isNaN(a))placeCoords[p]={lat:a,lng:b};}});
     if(pr.formTime) formTime=pr.formTime;
     if(pr.lastBackup) lastBackup=pr.lastBackup;
+    if(pr.autoKey) autoKey=pr.autoKey;
     if(pr.gym){const[a,b]=pr.gym.split(',').map(Number);if(!isNaN(a))gymLoc={lat:a,lng:b};}
     settingsLoaded=true;
     if(pr.formOn) formOn=pr.formOn!=='0';
@@ -2486,6 +2492,7 @@ async function loadTodayChecks(){
   try{
     const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(td,'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime']]);
     todayChecks=(d&&d.items||[]).filter(e=>e.status!=='cancelled');todayChecksKey=td;
+    syncAutoChecks();
   }catch(e){todayChecks=null;console.error(e);}
 }
 function lessonPlace(e){
@@ -3343,6 +3350,7 @@ const HELP=[
   ['排班改了','老闆改或刪排班，下次打開網站或按首頁重新整理就會更新。'],
  ]},
  {t:'🕘 打卡',items:[
+  ['全自動打卡','設定 → 打卡 →「全自動打卡（iPhone 捷徑）」，照步驟在 Cloudflare 放三組密碼、在 iPhone 捷徑建立抵達／離開的自動化。之後不用開網站也會自動打卡和健身計時。'],
   ['設定教室位置','設定 → 教室位置，人在教室時按「設為目前位置」，每間設一次。'],
   ['自動打卡','那間教室今天有課、你人在附近時打開網站，就會自動打卡。泰順沒有排課，所以要按打卡按鈕。'],
   ['補打卡','有課卻沒打卡超過 10 分鐘，首頁會出現紅色提醒，按「補打卡」以第一堂課時間補登。'],
@@ -4016,6 +4024,48 @@ async function setGymHere(){
   catch(e){showToast('❌ '+e.message);}
 }
 
+// ══════════ 全自動打卡設定（iPhone 捷徑）══════════
+let autoKey='';
+const AUTO_PLACES=[['yangmei','楊梅宏音'],['linkou','林口星玥'],['neili','內壢奧莉琪'],['yiwen','藝文鹿納'],['taishun','泰順錄音室'],['gym','健身房']];
+function autoUrl(code,ev){return `${AUTH_WORKER}/auto?key=${autoKey}&place=${code}&event=${ev}`;}
+async function ensureAutoKey(){
+  if(autoKey) return;
+  const a=new Uint8Array(18);crypto.getRandomValues(a);
+  autoKey=Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');
+  await saveFormSetting(true);
+}
+async function copyStr(t,label){try{await navigator.clipboard.writeText(t);showToast(`✅ 已複製${label||''}`);}catch(e){prompt('請手動複製：',t);}}
+async function renderAuto(){
+  const w=document.getElementById('auto-wrap');
+  if(!settingsLoaded){w.innerHTML='<div class="rec-empty">讀取中…</div>';await loadCheckinSettings();}
+  await ensureAutoKey();
+  const step=(n,t,body)=>`<div class="rec-card" style="padding:12px 14px;margin-bottom:10px;"><div style="font-size:14px;font-weight:800;color:var(--text);margin-bottom:6px;">${n}. ${t}</div><div style="font-size:13px;color:var(--text2);line-height:1.7;">${body}</div></div>`;
+  const cbtn=(t,l)=>`<button style="${smallBtn('var(--accent)')}" onclick="copyStr(${JSON.stringify(t).replace(/"/g,'&quot;')},'${l}')">複製</button>`;
+  let h=`<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.7;">設定好之後，iPhone 會在你抵達、離開教室和健身房時自動通知系統打卡，不用打開網站。只需要設定一次。</div>`;
+  h+=step(1,'把三組密碼放進 Cloudflare',`到 Cloudflare → notion-proxy → Settings → Variables and Secrets，新增三個（類型都選 Secret）：
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
+    <div style="display:flex;align-items:center;gap:8px;"><code style="flex:1;font-size:12px;">AUTO_KEY</code>${cbtn(autoKey,' AUTO_KEY')}</div>
+    <div style="display:flex;align-items:center;gap:8px;"><code style="flex:1;font-size:12px;">GOOGLE_REFRESH_TOKEN</code>${gRT?cbtn(gRT,' Google 憑證'):'<span style="font-size:12px;color:var(--red);">請先啟用長期登入</span>'}</div>
+    <div style="display:flex;align-items:center;gap:8px;"><code style="flex:1;font-size:12px;">NOTION_TOKEN</code>${cbtn(NOTION_TOKEN,' Notion 權杖')}</div></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">這三組都是密碼，只貼進 Cloudflare，不要傳給別人。</div>`);
+  h+=step(2,'更新 Worker 程式','把新版 worker.js 貼進 Cloudflare 的 Edit code，按 Deploy。');
+  h+=step(3,'在 iPhone「捷徑」建立自動化',`每個地點建兩個：「抵達」和「離開」。<br>捷徑 App → 自動化 → ＋ → 選「抵達」（或「離開」）→ 選擇位置（搜尋教室地址）→ 選「立即執行」→ 下一步 → 新增空白自動化 → 加入動作「取得 URL 的內容」→ 貼上下面對應的網址 → 完成。`);
+  h+=`<div class="rec-card" style="padding:4px 14px;margin-bottom:10px;">`+AUTO_PLACES.map(([c,n])=>`<div style="padding:8px 0;border-top:1px solid var(--border);">
+      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">${n}</div>
+      <div style="display:flex;gap:8px;">${cbtn(autoUrl(c,'arrive'),` ${n} 抵達網址`).replace('>複製<','>抵達網址<')}${cbtn(autoUrl(c,'leave'),` ${n} 離開網址`).replace('>複製<','>離開網址<')}</div></div>`).join('').replace('border-top:1px solid var(--border);','')+`</div>`;
+  h+=step(4,'怎麼運作',`・抵達教室：那間教室<b>今天有課</b>（泰順是有排班）才會打卡，路過不會誤打<br>・下班時間先用最後一堂課（或班表）的結束時間，離開時改成實際離開時間<br>・中途離開又回來，會接著計時<br>・健身房：抵達開始計時、離開結束；停留不到 10 分鐘當作路過<br>・打開網站時，系統會把全自動打的卡同步到 Notion，並排好泰順時數提醒`);
+  w.innerHTML=h;
+}
+// 打開網站時：把全自動（Worker）建立的打卡補同步到 Notion，並排泰順提醒
+async function syncAutoChecks(){
+  const list=(todayChecks||[]).filter(e=>e.extendedProperties?.private?.how==='全自動打卡'&&e.extendedProperties?.private?.synced!=='1');
+  if(!list.length) return;
+  for(const e of list){
+    try{await ckNotionUpsert(e);await ck('PATCH',`/events/${e.id}`,{extendedProperties:{private:{...e.extendedProperties.private,synced:'1'}}});}catch(err){console.warn(err);}
+  }
+  if(list.some(e=>e.extendedProperties.private.place===FORM_PLACE)) await syncFormReminder(twToday());
+}
+
 function renderChangelog(){
   markSeen();
   document.getElementById('changelog-wrap').innerHTML=CHANGELOG.map((c,i)=>`<div class="rec-card" style="padding:12px 14px;margin-bottom:10px;">
@@ -4131,6 +4181,7 @@ let formTime='23:30',formOn=true,setStats={};
 function settingsPrivate(){
   const pr={kind:'settings',formTime,formOn:formOn?'1':'0',lastBackup:lastBackup||''};
   if(gymLoc) pr.gym=`${gymLoc.lat.toFixed(6)},${gymLoc.lng.toFixed(6)}`;
+  if(autoKey) pr.autoKey=autoKey;
   PLACES.forEach((p,i)=>{if(placeCoords[p])pr['p'+i]=`${placeCoords[p].lat.toFixed(6)},${placeCoords[p].lng.toFixed(6)}`;});
   return pr;
 }
@@ -4183,6 +4234,7 @@ function renderSettings(){
     setRow('⚠️','泰順時數提醒',formOn?`有在泰順打卡的日子 ${formTime}`:'已關閉',null,
       `<div style="display:flex;gap:6px;align-items:center;">${timeInput('form-time',formTime,"formTime=this.value;saveFormSetting()")}<button onclick="formOn=!formOn;saveFormSetting()" style="${smallBtn(formOn?'var(--accent)':'var(--text3)')}">${formOn?'開':'關'}</button></div>`));
   h+=setGroup('打卡',
+    setRow('⚡','全自動打卡（iPhone 捷徑）','不用開網站，抵達離開自動打卡和健身計時',"showPage('auto')")+
     setRow('📍','教室位置',`已設定 ${setCnt}／${PLACES.length}・在附近又有課會自動打卡`,'openPlaces()'));
   h+=setGroup('連線與同步',
     setRow('📅','Google 日曆',g?(gRT?'已連接・長期登入':'已連接（約一小時需重新連接）'):(gRT?'重新取得授權中…':'未連接'),null,
@@ -4415,7 +4467,7 @@ function showPage(id){
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
   {const hb=document.getElementById('header-bell');if(hb)hb.style.display=id==='home'?'':'none';}
-const titles={gym:'健身紀錄',health:'系統檢查',feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
+const titles={auto:'全自動打卡',gym:'健身紀錄',health:'系統檢查',feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
@@ -4435,6 +4487,7 @@ const titles={gym:'健身紀錄',health:'系統檢查',feed:'最新動態',help:
   if(id==='feed') renderFeed();
   if(id==='health') runHealth();
   if(id==='gym') renderGym();
+  if(id==='auto') renderAuto();
   if(id==='help'){helpQuery='';document.getElementById('help-wrap').innerHTML='';renderHelp();}
   if(id==='rooms') renderHome();
   if(id==='schedule'){renderSchedule();if(!navFromPop){window.scrollTo(0,0);scheduleScrollPending=true;requestAnimationFrame(()=>requestAnimationFrame(scrollScheduleToNow));}}
