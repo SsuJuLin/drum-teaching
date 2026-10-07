@@ -262,8 +262,8 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
       <div id="alerts"></div>
       <div id="checkin-card"></div>
       <div id="cmd-box"></div>
-      <div id="todo-home"></div>
       <div id="unrec-card"></div>
+      <div id="todo-home"></div>
       <div id="gcal-panel" style="display:none;"></div>
       <div id="home-version" style="text-align:center;font-size:11px;color:var(--text3);margin:18px 0 8px;"></div>
     </div>
@@ -285,7 +285,7 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
     <div class="page" id="page-health">
       <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
       <div style="padding:0 16px 24px;"><div class="rec-card" style="padding:4px 14px;" id="health-wrap"></div>
-      <div style="text-align:center;margin-top:12px;"><button class="add-rec-btn" onclick="runHealth()">重新檢查</button></div></div>
+      <div style="text-align:center;margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;"><button class="add-rec-btn" onclick="runHealth()">重新檢查</button><button id="fix-dup-btn" class="btn-cancel" style="padding:6px 14px;" onclick="fixDupLessons()">刪除重複的課</button></div></div>
     </div>
     <div class="page" id="page-feed">
       <button class="back-bar" onclick="goBack('home')">‹ 返回</button>
@@ -1060,8 +1060,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.08-1';
+const APP_VERSION='2026.10.08-2';
 const CHANGELOG=[
+  {v:'2026.10.08-2',items:['首頁「今日課程」移到「待辦事項」上面','泰順的班跟其他課一起照時間排在今日課程裡','修正：體驗課學生轉正式後，每週課可能跟當天的體驗課疊成兩堂（薪水也會重複算）；系統檢查可以找出並刪除重複的課','待辦事項：只有當天截止和已過期的會跳到提醒區；明天截止的留在清單裡用黃色標示','取消待辦前一天中午的手機通知']},
   {v:'2026.10.08-1',items:['最新動態的「打卡」分頁改名「地點」，健身工廠 中壢廠的健身紀錄也會一起列出','健身房統一顯示為「健身工廠 中壢廠」']},
   {v:'2026.10.07-11',items:['全自動打卡：搭配 iPhone 捷徑，抵達和離開教室、泰順、健身房時自動打卡或計時，不用打開網站（設定 → 打卡 → 全自動打卡）','全自動打的卡，打開網站時會自動同步到 Notion，泰順時數提醒也會排好']},
   {v:'2026.10.07-10',items:['在課表看其他週時，再按一次底部日曆圖示會回到本週（Day 模式回到今天），並捲到現在時間','新增「🏋️ 健身紀錄」（設定 → 紀錄）：開始／結束一鍵記錄、手動補登、每月次數和時數，存在 Notion，不放日曆','設定健身房位置後，人到健身房打開網站就會自動開始計時；健身中首頁會顯示「結束」按鈕']},
@@ -1251,7 +1252,12 @@ async function syncStudent(s){
     if(keep.summary!==`🥁 ${s.name}`||(keep.location||'')!==(s.room||''))
       await gcal('PATCH',`/events/${keep.id}`,{summary:`🥁 ${s.name}`,location:s.room||''});
   }else if(wantsWeekly(s)){
-    const ds=nextDateFor(s.day);
+    let ds=nextDateFor(s.day);
+    // 第一堂那天如果已經有這位學生的課（體驗、約課、補課），就從下一週開始，避免疊兩堂
+    try{
+      const ex=await gcal('GET','/events',null,[['privateExtendedProperty',`studentId=${s.id}`],['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true']]);
+      if((ex&&ex.items||[]).some(e=>e.status!=='cancelled'&&e.start?.dateTime)) ds=addDays(ds,7);
+    }catch(e){}
     const b=evBody(s,ds,s.time,dur,'weekly');
     b.recurrence=['RRULE:FREQ=WEEKLY'];
     // 用學生+時段+建立日期組成固定 ID，避免同時執行兩次同步時重複建立
@@ -2423,11 +2429,12 @@ function unrecHtml(){
   const now=Date.now();
   let html=`<div style="${wrapS}display:flex;align-items:baseline;justify-content:space-between;">
     <div class="sec-line" style="margin:0;"><div class="section-title">今日課程</div><div class="rec-count">・${all.length} 堂</div></div></div>`;
-  const shRows=(todayShifts||[]).filter(sh=>evParts(sh.start).date===td).map(sh=>`<div style="display:flex;gap:10px;padding:9px 0;align-items:center;border-top:1px solid var(--border);">
+  const shItems=(todayShifts||[]).filter(sh=>evParts(sh.start).date===td).map(sh=>({t:sh.start,h:`<div style="display:flex;gap:10px;padding:9px 0;align-items:center;border-top:1px solid var(--border);">
       <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${evParts(sh.start).hhmm}</div>
-      <div style="flex:1;font-size:14px;font-weight:700;color:#2fb5a0;">🎧 ${SHIFT_LABEL}<span style="font-size:12px;font-weight:400;color:var(--text3);">・班 ${evParts(sh.start).hhmm}–${evParts(sh.end).hhmm}</span></div></div>`).join('');
+      <div style="flex:1;font-size:14px;font-weight:700;color:#2fb5a0;">🎧 ${SHIFT_LABEL}<span style="font-size:12px;font-weight:400;color:var(--text3);">・班 ${evParts(sh.start).hhmm}–${evParts(sh.end).hhmm}</span></div></div>`}));
+  const shRows=shItems.map(x=>x.h).join('');
   if(!all.length) return html+(shRows?`<div style="${box}padding:4px 12px;">${shRows.replace('border-top:1px solid var(--border);','')}</div>`:`<div style="${box}font-size:13px;color:var(--text3);">今天沒有課</div>`);
-  html+=`<div style="${box}padding:4px 12px;">`+all.map((e,i)=>{
+  const lessonItems=all.map((e,i)=>{
     const p=evParts(e.start.dateTime);const st=evState(e);const sub=isSub(e);const pr=e.extendedProperties?.private||{};
     const sid=pr.studentId;const ended=new Date(e.end.dateTime).getTime()<=now;
     const rec=sub?(pr.content?{}:null):records.find(r=>r.studentId===sid&&r.date===td);
@@ -2450,14 +2457,16 @@ function unrecHtml(){
         </div>`;
       }
     }
-    return`<div style="border-top:${i?'1px solid var(--border)':'none'};">
+    return{t:e.start.dateTime,h:`<div style="border-top:1px solid var(--border);">
       <div onclick="${st?'':`toggleToday('${e.id}')`}" style="display:flex;gap:10px;padding:9px 0;align-items:flex-start;${st?'opacity:0.5;':'cursor:pointer;'}">
         <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${p.hhmm}</div>
         <div style="flex:1;min-width:0;">
           <div style="display:flex;gap:8px;align-items:baseline;"><div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;${st?'text-decoration:line-through;':''}">${sub?'🔁 ':''}${!sub&&isTrial(students.find(x=>x.id===sid))?'🌱 ':''}${esc(name)}${!sub&&todos.some(t=>t.sid===sid)?' <span style="font-size:11px;" title="有待辦">☑️</span>':''}</div><div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">・${sub2}</div><div style="font-size:11px;margin-left:auto;white-space:nowrap;">${tag}</div></div>
         </div>
-      </div>${detail}</div>`;
-  }).join('')+shRows+`</div>`;
+      </div>${detail}</div>`};
+  });
+  const merged=[...lessonItems,...shItems].sort((a,b)=>new Date(a.t)-new Date(b.t)).map(x=>x.h).join('').replace('border-top:1px solid var(--border);','');
+  html+=`<div style="${box}padding:4px 12px;">${merged}</div>`;
   return html;
 }
 
@@ -3287,7 +3296,7 @@ const HELP=[
   ['待辦','寫上課紀錄時在「待辦」欄一行打一項，例如「印掉了的譜」。期限自動設成那位學生的下一堂課。'],
   ['新增待辦','首頁待辦區或學生頁按「＋」；也可以用指令框「小明 待辦 印譜」。不選學生就是個人待辦，例如「待辦 買鼓棒 10/10」。'],
   ['完成待辦','首頁或學生頁的待辦，勾左邊的方框就完成。'],
-  ['快到期提醒','期限前一天，首頁上方會出現黃色卡片「⏰ 明天要用」，當天或過期變紅色；前一天 12:00 手機也會收到通知。通知在「打卡紀錄」日曆，手機的 Google 日曆要勾選顯示並允許通知。'],
+  ['快到期提醒','明天截止的待辦在清單裡用黃色標示「⏰ 明天要用」；當天截止或已過期的會跳到首頁最上方的提醒區，紅色顯示。'],
  ]},
  {t:'🔔 最新動態',items:[
   ['在哪裡','首頁標題卡右上角的鈴鐺。'],
@@ -3647,15 +3656,16 @@ async function doneTodo(id){
 function todoRow(t,showName){
   const s=students.find(x=>x.id===t.sid);const td=twToday();
   const col=!t.due?'var(--text3)':t.due<td?'var(--red)':t.due<=addDays(td,1)?'#c8a84a':'var(--text3)';
-  const when=!t.due?'沒有下一堂課':t.due<td?`已過期・${fmtMD(t.due)}`:t.due===td?'今天上課':`下次上課 ${fmtMD(t.due)}`;
-  return`<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-top:1px solid var(--border);">
-    <button onclick="doneTodo('${t.id}')" aria-label="完成" style="width:20px;height:20px;flex-shrink:0;margin-top:1px;border-radius:5px;border:1.5px solid var(--text3);background:none;cursor:pointer;"></button>
+  const when=!t.due?'沒有下一堂課':t.due<td?`已過期・${fmtMD(t.due)}`:t.due===td?'今天上課':t.due===addDays(td,1)?`⏰ 明天要用・${fmtMD(t.due)}`:`下次上課 ${fmtMD(t.due)}`;
+  const soon=t.due&&t.due===addDays(td,1);
+  return`<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0 7px ${soon?'8px':'0'};border-top:1px solid var(--border);${soon?'border-left:3px solid #c8a84a;margin-left:-4px;background:rgba(200,168,74,0.08);':''}">
+    <button onclick="doneTodo('${t.id}')" aria-label="完成" style="width:20px;height:20px;flex-shrink:0;margin-top:1px;border-radius:5px;border:1.5px solid ${soon?'#c8a84a':'var(--text3)'};background:none;cursor:pointer;"></button>
     <div style="flex:1;min-width:0;"><div style="font-size:14px;color:var(--text);">${esc(t.text)}</div>
     <div style="font-size:11px;color:${col};">${showName?(s?esc(s.name):'個人')+'・':''}${t.sid?when:(t.due?(t.due<td?`已過期・${fmtMD(t.due)}`:`期限 ${fmtMD(t.due)}`):'沒有期限')}</div></div></div>`;
 }
 function todoHomeHtml(){
   const tm=addDays(twToday(),1);
-  const list=[...todos].filter(t=>!(t.due&&t.due<=tm)).sort((a,b)=>(a.due||'9999')<(b.due||'9999')?-1:1);
+  const list=[...todos].filter(t=>!(t.due&&t.due<=twToday())).sort((a,b)=>(a.due||'9999')<(b.due||'9999')?-1:1);
   return`<div style="margin:0 16px 10px;"><div style="display:flex;align-items:center;margin-bottom:6px;"><div class="sec-line" style="margin:0;"><div class="section-title">待辦事項</div><div class="rec-count">・${list.length} 項</div></div>
       <button class="add-rec-btn" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="openTodoNew()">＋</button></div>
     ${list.length?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:2px 12px 4px;">${list.map(t=>todoRow(t,true)).join('').replace('border-top:1px solid var(--border);','')}</div>`:''}</div>`;
@@ -3786,7 +3796,7 @@ async function copyHandover(place,teacher){
 const TODO_REMIND_TIME='12:00';
 function todoAlertHtml(){
   const td=twToday(),tm=addDays(td,1);
-  const due=todos.filter(t=>t.due&&t.due<=tm).sort((a,b)=>a.due<b.due?-1:1);
+  const due=todos.filter(t=>t.due&&t.due<=td).sort((a,b)=>a.due<b.due?-1:1);
   if(!due.length) return '';
   return due.map(t=>{
     const s=students.find(x=>x.id===t.sid);const late=t.due<=td;
@@ -3806,10 +3816,7 @@ async function syncTodoReminders(){
   try{
     const now=Date.now();
     const want={};
-    todos.filter(t=>t.due).forEach(t=>{
-      const at=new Date(twISO(addDays(t.due,-1),TODO_REMIND_TIME)).getTime();
-      if(at>now)(want[t.due]=want[t.due]||[]).push(t);
-    });
+    // 已取消前一天中午的手機通知：只清掉之前建立的提醒
     const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=todoReminder'],['timeMin',new Date(now-86400000).toISOString()],['singleEvents','true'],['maxResults','100']]);
     const have=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
     for(const e of have){
@@ -3839,7 +3846,19 @@ const DB_SPECS=[
   {id:()=>DB_SONGS,name:'點歌',need:{'學生':['relation'],'連結':['url','rich_text'],'狀態':['select','status'],'點歌日':['date']}},
   {id:()=>DB_TODOS,name:'待辦',need:{'學生':['relation'],'完成':['checkbox'],'期限':['date']}},
 ];
-let healthBusy=false;
+let healthBusy=false,dupLessons=[];
+async function fixDupLessons(){
+  if(!dupLessons.length){showToast('沒有重複的課');return;}
+  showConfirm('刪除重複的課',`共 ${dupLessons.length} 個時段，每個時段會保留一堂（優先保留體驗課、約課、補課這類單次的課），刪掉多出來的那堂。`,async()=>{
+    let n=0;
+    for(const grp of dupLessons){
+      const keep=grp.find(e=>e.extendedProperties.private.kind==='booking')||grp.find(e=>!e.recurringEventId)||grp[0];
+      for(const e of grp){ if(e===keep) continue; try{await gcal('DELETE',`/events/${e.id}`);n++;}catch(err){console.warn(err);} }
+    }
+    weekKey=null;weekCache={};todayKey=null;dupLessons=[];
+    showToast(`✅ 已刪除 ${n} 堂重複的課`);runHealth();
+  },'刪除');
+}
 async function runHealth(){
   if(healthBusy) return;healthBusy=true;
   const box=document.getElementById('health-wrap');
@@ -3876,6 +3895,14 @@ async function runHealth(){
     const rows2=await querySalary();
     const bad=rows2.filter(r=>r.type==='入帳'&&(!r.date||!r.amount));
     add(bad.length?'warn':true,bad.length?`薪資紀錄有 ${bad.length} 筆收款沒填日期或金額`:'薪資紀錄資料完整',bad.map(r=>r.name).slice(0,8).join('\n'));
+  }catch(e){}
+  try{
+    const from=addDays(twToday(),-30),to=addDays(twToday(),60);
+    const items=(await gcalAll([['timeMin',twISO(from,'00:00')],['timeMax',twISO(to,'00:00')],['singleEvents','true'],['maxResults','2500']])).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&e.extendedProperties?.private?.studentId);
+    const g={};items.forEach(e=>{const k=e.extendedProperties.private.studentId+'|'+e.start.dateTime;(g[k]=g[k]||[]).push(e);});
+    dupLessons=Object.values(g).filter(a=>a.length>1);
+    if(dupLessons.length) add('warn',`有 ${dupLessons.length} 個時段同一位學生重複排了兩堂課`,dupLessons.map(a=>`${evName(a[0])} ${fmtMD(evParts(a[0].start.dateTime).date)} ${evParts(a[0].start.dateTime).hhmm}`).join('\n')+'\n（薪水會重複計算）→ 按下方「刪除重複的課」');
+    else add(true,'沒有重複排課');
   }catch(e){}
   const dups=dupRecords().length;add(dups?'warn':true,dups?`有 ${dups} 筆重複的上課紀錄`:'沒有重複的上課紀錄',dups?'設定 → 連線與同步 →「清除重複的上課紀錄」':'');
   const weeklyBad=students.filter(s=>s.status==='正常上課'&&!isBooking(s)&&(!s.day||!s.time||!s.room));
