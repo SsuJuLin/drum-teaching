@@ -1060,8 +1060,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.08-2';
+const APP_VERSION='2026.10.08-3';
 const CHANGELOG=[
+  {v:'2026.10.08-3',items:['修正：iPhone 捷徑已經打過卡時，打開網站有機會再自動打一次卡，變成同一個地點兩筆打卡']},
   {v:'2026.10.08-2',items:['首頁「今日課程」移到「待辦事項」上面','泰順的班跟其他課一起照時間排在今日課程裡','修正：體驗課學生轉正式後，每週課可能跟當天的體驗課疊成兩堂（薪水也會重複算）；系統檢查可以找出並刪除重複的課','待辦事項：只有當天截止和已過期的會跳到提醒區；明天截止的留在清單裡用黃色標示','取消待辦前一天中午的手機通知']},
   {v:'2026.10.08-1',items:['最新動態的「打卡」分頁改名「地點」，健身工廠 中壢廠的健身紀錄也會一起列出','健身房統一顯示為「健身工廠 中壢廠」']},
   {v:'2026.10.07-11',items:['全自動打卡：搭配 iPhone 捷徑，抵達和離開教室、泰順、健身房時自動打卡或計時，不用打開網站（設定 → 打卡 → 全自動打卡）','全自動打的卡，打開網站時會自動同步到 Notion，泰順時數提醒也會排好']},
@@ -2531,6 +2532,15 @@ function checkedPlace(p){return (todayChecks||[]).find(e=>e.extendedProperties?.
 function hhmmOf(ms){return evParts(new Date(ms).toISOString()).hhmm;}
 function isoTW(ms){return new Date(ms+TW_MS).toISOString().slice(0,19)+'+08:00';}
 async function createCheckin(place,startMs,endMs,how){
+  // 建立前先到日曆確認今天這個地點是不是已經打過卡（捷徑可能剛打過，畫面上的資料還沒更新）
+  if(how!=='手動打卡'){
+    try{
+      const ds=evParts(isoTW(startMs)).date;
+      const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true']]);
+      const ex=(d&&d.items||[]).find(e=>e.status!=='cancelled'&&e.extendedProperties?.private?.place===place);
+      if(ex){await loadTodayChecks();throw new Error(`${place.replace(' Yamaha','')} 今天已經打過卡了（${evParts(ex.start.dateTime).hhmm}）`);}
+    }catch(e){if(/已經打過卡/.test(e.message))throw e;}
+  }
   if(endMs<=startMs) endMs=startMs+60*60000;
   const created=await ck('POST','/events',{
     summary:`📍 ${place}`,location:place,description:how,
@@ -2559,7 +2569,7 @@ async function autoCheckin(force){
   if(!force&&Date.now()-lastAuto<5*60000) return;
   autoBusy=true;lastAuto=Date.now();
   try{
-    if(todayChecksKey!==twToday()) await loadTodayChecks();
+    await loadTodayChecks();
     const pos=await getPos();
     if(gymLoc&&distM(pos,gymLoc)<=150+Math.min(pos.acc||0,150)){
       if(gymRows===null) await loadGym();
