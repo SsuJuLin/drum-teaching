@@ -1060,8 +1060,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.08-3';
+const APP_VERSION='2026.10.08-4';
 const CHANGELOG=[
+  {v:'2026.10.08-4',items:['今日課程的泰順改名「泰順」，打卡後顯示實際時間和時數（含通勤），填完時數標「✅ 已填」','「記得填泰順時數」卡片改成下午 3 點後或已經離開才出現，填完就收進今日課程','泰順時數的離開後提醒改成依實際離開時間（iPhone 捷徑偵測到離開時）＋30 分鐘，還沒離開不會排','泰順時數提醒和每日填紀錄提醒時間相同時，合併成一則通知']},
   {v:'2026.10.08-3',items:['修正：iPhone 捷徑已經打過卡時，打開網站有機會再自動打一次卡，變成同一個地點兩筆打卡']},
   {v:'2026.10.08-2',items:['首頁「今日課程」移到「待辦事項」上面','泰順的班跟其他課一起照時間排在今日課程裡','修正：體驗課學生轉正式後，每週課可能跟當天的體驗課疊成兩堂（薪水也會重複算）；系統檢查可以找出並刪除重複的課','待辦事項：只有當天截止和已過期的會跳到提醒區；明天截止的留在清單裡用黃色標示','取消待辦前一天中午的手機通知']},
   {v:'2026.10.08-1',items:['最新動態的「打卡」分頁改名「地點」，健身工廠 中壢廠的健身紀錄也會一起列出','健身房統一顯示為「健身工廠 中壢廠」']},
@@ -2419,6 +2420,14 @@ function linkify(t){
   });
 }
 function esc(t){return String(t||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function shiftLineText(sh){
+  const fc=(todayChecks||[]).filter(e=>e.extendedProperties?.private?.place===FORM_PLACE);
+  if(!fc.length) return `班 ${evParts(sh.start).hhmm}–${evParts(sh.end).hhmm}`;
+  const span=fc.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
+  const hrs=fc.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
+  const done=fc.some(e=>e.extendedProperties?.private?.formDone==='1');
+  return `${span}・${formHoursText(hrs)}${done?' <span style="color:var(--accent);">✅ 已填</span>':''}`;
+}
 function unrecHtml(){
   const wrapS='margin:0 16px 10px;';
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;min-width:0;';
@@ -2432,7 +2441,7 @@ function unrecHtml(){
     <div class="sec-line" style="margin:0;"><div class="section-title">今日課程</div><div class="rec-count">・${all.length} 堂</div></div></div>`;
   const shItems=(todayShifts||[]).filter(sh=>evParts(sh.start).date===td).map(sh=>({t:sh.start,h:`<div style="display:flex;gap:10px;padding:9px 0;align-items:center;border-top:1px solid var(--border);">
       <div style="width:40px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--text2);">${evParts(sh.start).hhmm}</div>
-      <div style="flex:1;font-size:14px;font-weight:700;color:#2fb5a0;">🎧 ${SHIFT_LABEL}<span style="font-size:12px;font-weight:400;color:var(--text3);">・班 ${evParts(sh.start).hhmm}–${evParts(sh.end).hhmm}</span></div></div>`}));
+      <div style="flex:1;font-size:14px;font-weight:700;color:#2fb5a0;">泰順<span style="font-size:12px;font-weight:400;color:var(--text3);">・${shiftLineText(sh)}</span></div></div>`}));
   const shRows=shItems.map(x=>x.h).join('');
   if(!all.length) return html+(shRows?`<div style="${box}padding:4px 12px;">${shRows.replace('border-top:1px solid var(--border);','')}</div>`:`<div style="${box}font-size:13px;color:var(--text3);">今天沒有課</div>`);
   const lessonItems=all.map((e,i)=>{
@@ -3065,7 +3074,7 @@ async function syncFormReminder(ds){
     const rem=items.filter(e=>e.extendedProperties?.private?.kind==='formReminder');
     const rem2=items.filter(e=>e.extendedProperties?.private?.kind==='formReminder2');
     const done=checks.some(e=>e.extendedProperties?.private?.formDone==='1');
-    if(!checks.length||done||!formOn){for(const r of [...rem,...rem2]) await ck('DELETE',`/events/${r.id}`);return;}
+    if(!checks.length||done||!formOn){for(const r of [...rem,...rem2]) await ck('DELETE',`/events/${r.id}`);syncDailyReminder();return;}
     const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
     const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
     const summary=`⚠️ 記得填泰順時數（${span}・${formHoursText(hrs)}）`;
@@ -3074,12 +3083,14 @@ async function syncFormReminder(ds){
       start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,10),timeZone:'Asia/Taipei'},
       transparency:'transparent',reminders:{useDefault:false,overrides:[{method:'popup',minutes:0}]},
       extendedProperties:{private:{kind:'formReminder',date:ds}}};
-    if(rem.length){
+    const merged=reminderEv&&evParts(reminderEv.start.dateTime).hhmm===formTime;
+    if(merged){for(const r of rem) await ck('DELETE',`/events/${r.id}`);}   // 跟每日填紀錄同一時間 → 合併成一則（見 syncDailyReminder）
+    else if(rem.length){
       if(rem[0].summary!==summary||evParts(rem[0].start.dateTime).hhmm!==formTime) await ck('PATCH',`/events/${rem[0].id}`,{summary,description:body.description,start:body.start,end:body.end});
       for(const r of rem.slice(1)) await ck('DELETE',`/events/${r.id}`);
     }else await ck('POST','/events',body);
-    // 按了「下班」→ 下班後 30 分鐘再提醒一次（太接近晚上那次就不另外提醒）
-    const outs=checks; // 依打卡的下班時間（表定或按「下班」更新後）
+    // 實際離開（按下班或捷徑偵測到離開）後 30 分鐘再提醒一次；還沒離開就不排
+    const outs=checks.filter(e=>e.extendedProperties?.private?.checkedOut==='1');
     let want=null;
     if(outs.length){
       const lastEnd=Math.max(...outs.map(e=>new Date(e.end.dateTime).getTime()));
@@ -3093,6 +3104,7 @@ async function syncFormReminder(ds){
       else await ck('POST','/events',b2);
     }else{for(const r of rem2) if(new Date(r.start.dateTime).getTime()>Date.now()) await ck('DELETE',`/events/${r.id}`);}
   }catch(e){console.warn('formReminder',e.message);}
+  syncDailyReminder();
 }
 function formCardHtml(){
   const checks=(todayChecks||[]).filter(e=>e.extendedProperties?.private?.place===FORM_PLACE);
@@ -3101,9 +3113,11 @@ function formCardHtml(){
   const box='background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:0 16px 10px;box-sizing:border-box;';
   const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
   const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
-  if(done) return`<div style="${box}font-size:13px;color:var(--accent);">✅ 泰順時數已填（${span}・${formHoursText(hrs)}）</div>`;
+  if(done) return '';
+  const left=checks.some(e=>e.extendedProperties?.private?.checkedOut==='1');
+  if(!left&&twNow().getUTCHours()<15) return '';
   return`<div style="${box}border-color:rgba(200,168,74,0.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <div style="flex:1;min-width:0;font-size:13px;color:#c8a84a;font-weight:700;">⚠️ 記得填泰順時數<div style="font-size:11px;color:var(--text3);font-weight:400;margin-top:2px;">今天 ${span}・${formHoursText(hrs)}・${formTime} 會提醒</div></div>
+    <div style="flex:1;min-width:0;font-size:13px;color:#c8a84a;font-weight:700;">⚠️ 記得填泰順時數<div style="font-size:11px;color:var(--text3);font-weight:400;margin-top:2px;">今天 ${span}・${formHoursText(hrs)}・離開後 30 分鐘和 ${formTime} 會提醒</div></div>
     ${FORM_URL?`<a href="${FORM_URL}" target="_blank" rel="noopener" style="${smallBtn('var(--text)')}text-decoration:none;">開表單</a>`:''}
     <button class="add-rec-btn" onclick="markFormDone()">完成</button></div>`;
 }
@@ -3171,11 +3185,23 @@ async function syncDailyReminder(){
     const td=twToday();
     const lessons=todayEvents.filter(e=>evParts(e.start.dateTime).date===td&&!evState(e));
     const allDone=lessons.every(e=>isSub(e)?!!e.extendedProperties?.private?.content:records.some(r=>r.studentId===e.extendedProperties?.private?.studentId&&r.date===td));
+    if(todayChecksKey!==td) await loadTodayChecks();
+    const merged=evParts(reminderEv.start.dateTime).hhmm===formTime;
+    const fc=(todayChecks||[]).filter(e=>e.extendedProperties?.private?.place===FORM_PLACE);
+    const needForm=merged&&formOn&&fc.length&&!fc.some(e=>e.extendedProperties?.private?.formDone==='1');
+    const needRec=!allDone;
+    let summary='📝 填寫今日上課紀錄';
+    if(needForm){
+      const span=fc.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
+      const hrs=fc.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
+      summary=needRec?`📝 填寫上課紀錄＋⚠️ 泰順時數（${span}・${formHoursText(hrs)}）`:`⚠️ 記得填泰順時數（${span}・${formHoursText(hrs)}）`;
+    }
     const d=await gcal('GET',`/events/${reminderEv.id}/instances`,null,[['timeMin',twISO(td,'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['showDeleted','true']]);
     const inst=(d&&d.items||[])[0];
     if(!inst) return;
-    if(allDone&&inst.status!=='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'cancelled'});
-    else if(!allDone&&inst.status==='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'confirmed'});
+    const active=needRec||needForm;
+    if(!active){if(inst.status!=='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'cancelled'});}
+    else if(inst.status==='cancelled'||inst.summary!==summary) await gcal('PATCH',`/events/${inst.id}`,{status:'confirmed',summary});
   }catch(e){console.warn('dailyReminder',e.message);}
   finally{drBusy=false;if(drAgain){drAgain=false;setTimeout(syncDailyReminder,300);}}
 }
