@@ -274,6 +274,17 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
     <div class="page" id="page-settings">
       <div style="padding:4px 16px 24px;" id="settings-wrap"></div>
     </div>
+    <div class="page" id="page-aihelp">
+      <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
+      <div style="padding:0 16px 24px;font-size:13px;color:var(--text2);line-height:1.8;">
+        <div class="rec-card" style="padding:12px 14px;margin-bottom:10px;"><b style="color:var(--text);">怎麼運作</b><br>指令框先用規則解讀；看不懂時，自動請 Google 的 Gemini AI 翻譯成指令，一樣會先顯示確認卡片（標 🤖），按確定才會執行。例如「小明下禮拜的課改到禮拜天早上十點」「婉珊這週六不來」。</div>
+        <div class="rec-card" style="padding:12px 14px;margin-bottom:10px;"><b style="color:var(--text);">設定（只要一次）</b><br>
+          1. 打開 aistudio.google.com/apikey，用你的 Google 帳號登入，按「Create API key」，複製金鑰<br>
+          2. Cloudflare → notion-proxy → Settings → Variables and Secrets，新增 <code>GEMINI_API_KEY</code>（Secret），貼上金鑰，按 Deploy<br>
+          3. 回到指令框打一句口語的句子試試</div>
+        <div class="rec-card" style="padding:12px 14px;"><b style="color:var(--text);">要知道的</b><br>・免費額度每天數百次，自己用綽綽有餘<br>・免費版的內容可能被 Google 用來改進模型，送出的只有你打的那句話和學生名字，不會送出紀錄內容<br>・規則看得懂的指令不會用到 AI</div>
+      </div>
+    </div>
     <div class="page" id="page-auto">
       <button class="back-bar" onclick="goBack('settings')">‹ 返回</button>
       <div style="padding:0 16px 24px;" id="auto-wrap"></div>
@@ -1013,7 +1024,6 @@ async function updateRecord(id,data){
     '超級讚點數':{number:data.stars},
   }});
 }
-async function deleteRecord(id){ return notionAPI('DELETE',`/pages/${id}`,null); }
 async function deletePage(id){ return notionAPI('PATCH',`/pages/${id}`,{archived:true}); }
 async function updateStudent(id,data){
   return notionAPI('PATCH',`/pages/${id}`,{properties:{
@@ -1060,8 +1070,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.08-4';
+const APP_VERSION='2026.10.09-1';
 const CHANGELOG=[
+  {v:'2026.10.09-1',items:['薪資頁泰順卡片新增「打卡對帳」：每天的打卡時數＋通勤、本月合計，方便對照公司薪資單','全自動打卡設定頁每個地點多了「🧪 測試抵達／測試離開」，只回報會做什麼，不會修改資料','AI 指令：指令框規則看不懂時，自動請 Gemini 解讀成指令（需在 Cloudflare 設定免費的 Gemini 金鑰）','程式整理：移除用不到的舊程式']},
   {v:'2026.10.08-4',items:['今日課程的泰順改名「泰順」，打卡後顯示實際時間和時數（含通勤），填完時數標「✅ 已填」','「記得填泰順時數」卡片改成下午 3 點後或已經離開才出現，填完就收進今日課程','泰順時數的離開後提醒改成依實際離開時間（iPhone 捷徑偵測到離開時）＋30 分鐘，還沒離開不會排','泰順時數提醒和每日填紀錄提醒時間相同時，合併成一則通知']},
   {v:'2026.10.08-3',items:['修正：iPhone 捷徑已經打過卡時，打開網站有機會再自動打一次卡，變成同一個地點兩筆打卡']},
   {v:'2026.10.08-2',items:['首頁「今日課程」移到「待辦事項」上面','泰順的班跟其他課一起照時間排在今日課程裡','修正：體驗課學生轉正式後，每週課可能跟當天的體驗課疊成兩堂（薪水也會重複算）；系統檢查可以找出並刪除重複的課','待辦事項：只有當天截止和已過期的會跳到提醒區；明天截止的留在清單裡用黃色標示','取消待辦前一天中午的手機通知']},
@@ -2050,8 +2061,15 @@ async function runCommand(){
   if(!text) return;
   if(!gcalValid()){out.innerHTML=cmdMsg('請先連接 Google 日曆',true);return;}
   out.innerHTML=cmdMsg('解讀中…');
-  const c=parseCommand(text); // ← 之後 B：可先問 AI，回傳同樣格式的物件
-  if(c.error){out.innerHTML=cmdMsg(c.error,true);return;}
+  let c=parseCommand(text);
+  if(c.error){
+    // 規則看不懂 → 請 AI 幫忙
+    out.innerHTML=cmdMsg('🤖 規則看不懂，請 AI 幫忙解讀…');
+    const a=await aiParse(text);
+    if(!a){out.innerHTML=cmdMsg(c.error,true);return;}
+    if(a.error){out.innerHTML=cmdMsg(a.error,true);return;}
+    c=a;
+  }
   try{
     if(c.action==='todo'){
       let due=c.due;
@@ -2116,7 +2134,7 @@ async function runCommand(){
     const lessonTxt=ev?`${day} ${evParts(ev.start.dateTime).hhmm}`:day;
     cmdPending={...c,ev};
     out.innerHTML=`<div style="background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-top:10px;">
-      <div style="font-size:14px;font-weight:700;color:var(--text);">${s.name}・${lessonTxt}</div>
+      <div style="font-size:14px;font-weight:700;color:var(--text);">${c.ai?'🤖 ':''}${s.name}・${lessonTxt}</div>
       <div style="font-size:13px;color:#c8a84a;margin:4px 0 10px;">→ ${desc}</div>
       <div style="display:flex;gap:8px;"><button class="btn-cancel" style="flex:1;" onclick="cmdPending=null;document.getElementById('cmd-result').innerHTML='';">取消</button>
       <button class="btn-save" style="flex:1;" id="cmd-ok" onclick="confirmCommand()">✅ 確定</button></div></div>`;
@@ -2890,6 +2908,25 @@ async function renderSalaryYears(){
   }catch(e){wrap.innerHTML=salaryTabs()+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
 }
 
+// 泰順打卡對帳：每天的打卡時數＋通勤，月底對照公司的薪資單
+function taishunReconHtml(list){
+  const byDay={};
+  list.forEach(e=>{const d=evParts(e.start.dateTime).date;(byDay[d]=byDay[d]||[]).push(e);});
+  const days=Object.keys(byDay).sort();
+  let tot=0;
+  const rows=days.map(d=>{
+    const es=byDay[d];const h=es.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);tot+=h;
+    const done=es.some(e=>e.extendedProperties?.private?.formDone==='1');
+    return`<div style="display:flex;gap:8px;padding:3px 0;border-top:1px solid var(--border);">
+      <div style="width:70px;color:var(--text2);">${fmtMD(d)}</div>
+      <div style="flex:1;color:var(--text3);">${es.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、')}</div>
+      <div style="color:var(--text2);white-space:nowrap;">${fmtH(h)}+${FORM_COMMUTE}=${fmtH(h+FORM_COMMUTE)}${done?' ✅':''}</div></div>`;
+  }).join('');
+  const withC=tot+days.length*FORM_COMMUTE;
+  return`<details style="margin-top:8px;font-size:12px;"><summary style="cursor:pointer;color:var(--text2);">🕘 打卡對帳：${days.length} 天・實際 ${fmtH(tot)}・含通勤 <b style="color:var(--text);">${fmtH(withC)}</b></summary>
+    <div style="margin-top:6px;">${rows}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">✅ 表示那天已按「完成」填過公司時數。收到泰順薪資時，對照「含通勤」的總時數。</div></details>`;
+}
 async function renderSalary(silent){
   const sOff=silent?0:salaryOff;
   const wrap=silent?{set innerHTML(v){}}:document.getElementById('salary-wrap');
@@ -2910,6 +2947,7 @@ async function renderSalary(silent){
   try{
     await loadPlaceRules();
     const startAll='2025-01-01';
+    const tsChecks=silent?[]:await ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(first,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]).then(d=>(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.extendedProperties?.private?.place===FORM_PLACE)).catch(()=>[]);
     const [lessonsAll,rows]=await Promise.all([
       gcalAll([['timeMin',twISO(startAll,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
       querySalary().then(r=>{salaryErr='';return r;}).catch(e=>{salaryErr=e.message;return[];}),
@@ -2959,6 +2997,7 @@ async function renderSalary(silent){
       if(x.hist===undefined) x.hist=!(x.lessons||x.subs||x.per4.some(p=>!p.progress));
       if(x.hist) x.pay+=r.amount||0;
     });
+    if(tsChecks.length) P(FORM_PLACE);
     const order=[...rulePlaces(),'其他'];
     const list=Object.values(places).sort((a,b)=>order.indexOf(a.place)-order.indexOf(b.place));
     const total=list.reduce((a,x)=>a+x.pay,0);
@@ -2986,6 +3025,7 @@ async function renderSalary(silent){
           <div style="font-size:16px;font-weight:800;color:var(--text);">${money(x.pay)}</div></div>
         ${x.hist?`<div style="font-size:11px;color:var(--text3);margin-top:2px;">歷史紀錄（依入帳金額）</div>`:''}
         <div style="font-size:11px;color:var(--text3);margin-top:2px;">${x.hist?'':x.lessons||x.subs?`上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${x.hours.toFixed(1)} 小時${rule.rate?`・時薪 ${rule.rate}`:''}・`:''}${due}</div>
+        ${x.place===FORM_PLACE&&tsChecks.length?taishunReconHtml(tsChecks):''}
         ${x.per4.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.per4.map(p=>{
           if(p.progress) return`<div style="color:var(--text3);">${esc(p.name)} 進度 ${p.progress}/4</div>`;
           const tag=`${p.name}（${mdShort(p.date)}）`;
@@ -3388,6 +3428,7 @@ const HELP=[
   ['日期寫法','10/31、10月31日、今天、明天、後天、週六、下週六、這週六'],
   ['時間寫法','19:00、7點、晚上七點半、下午3點（只寫 1～7 點會當作下午／晚上）'],
   ['安全機制','送出後一定會先顯示確認卡片，按「確定」才會真的修改。'],
+  ['AI 解讀','規則看不懂的口語句子，會自動請 AI 解讀，確認卡片會標 🤖。設定方式在 設定 → 連線與同步 →「AI 指令」。'],
  ]},
  {t:'🎧 泰順H14 排班',items:[
   ['自動讀取','系統會讀老闆的排班行事曆，只認標題是「林似儒」或「阿森」的行程，其他人的班和「阿森真的不行」這類行程都會略過。只讀不寫，不會改到老闆的行事曆。'],
@@ -3404,6 +3445,7 @@ const HELP=[
   ['泰順時數','有在泰順打卡的日子會提醒填公司時數（含 2 小時通勤）：打卡的下班時間後 30 分鐘一次（按「下班」會更新成實際時間），晚上 23:30 再一次。填完在首頁按「完成」，兩個提醒都會取消。'],
  ]},
  {t:'💰 薪資',items:[
+  ['泰順對帳','薪資頁泰順那張卡片，點「🕘 打卡對帳」展開每天的打卡時數和含通勤的時數，月底跟公司薪資單對照。'],
   ['應領怎麼算','時薪 × 實際上課時數；學生有特別時薪就用特別價；請假、老師停課不算；代課和體驗課照教室時薪。當月只算已上完的課。'],
   ['藝文滿四堂','每位學生各自滿四堂發一次，同步日曆前已上的堂數填在學生的「藝文起始進度」。'],
   ['記錄收款','每收到一筆錢，就在那間教室按「＋ 記錄收款」，填金額和收到的日期。一個月可以記很多次，卡片會顯示「已收／應領」和每一筆。'],
@@ -4106,6 +4148,12 @@ async function ensureAutoKey(){
   autoKey=Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');
   await saveFormSetting(true);
 }
+async function testAuto(code,ev){
+  showToast('🧪 測試中…');
+  try{const r=await fetch(autoUrl(code,ev)+'&test=1');const t=await r.text();
+    showConfirm(r.ok?'測試結果':'測試失敗',t+(r.status===403?'（AUTO_KEY 對不上）':''),()=>{},'好');}
+  catch(e){showToast('❌ 連不到 Worker，請確認已部署新版 worker.js');}
+}
 async function copyStr(t,label){try{await navigator.clipboard.writeText(t);showToast(`✅ 已複製${label||''}`);}catch(e){prompt('請手動複製：',t);}}
 async function renderAuto(){
   const w=document.getElementById('auto-wrap');
@@ -4124,7 +4172,9 @@ async function renderAuto(){
   h+=step(3,'在 iPhone「捷徑」建立自動化',`每個地點建兩個：「抵達」和「離開」。<br>捷徑 App → 自動化 → ＋ → 選「抵達」（或「離開」）→ 選擇位置（搜尋教室地址）→ 選「立即執行」→ 下一步 → 新增空白自動化 → 加入動作「取得 URL 的內容」→ 貼上下面對應的網址 → 完成。`);
   h+=`<div class="rec-card" style="padding:4px 14px;margin-bottom:10px;">`+AUTO_PLACES.map(([c,n])=>`<div style="padding:8px 0;border-top:1px solid var(--border);">
       <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">${n}</div>
-      <div style="display:flex;gap:8px;">${cbtn(autoUrl(c,'arrive'),` ${n} 抵達網址`).replace('>複製<','>抵達網址<')}${cbtn(autoUrl(c,'leave'),` ${n} 離開網址`).replace('>複製<','>離開網址<')}</div></div>`).join('').replace('border-top:1px solid var(--border);','')+`</div>`;
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">${cbtn(autoUrl(c,'arrive'),` ${n} 抵達網址`).replace('>複製<','>抵達網址<')}${cbtn(autoUrl(c,'leave'),` ${n} 離開網址`).replace('>複製<','>離開網址<')}
+        <button style="${smallBtn('var(--text3)')}" onclick="testAuto('${c}','arrive')">🧪 測試抵達</button><button style="${smallBtn('var(--text3)')}" onclick="testAuto('${c}','leave')">🧪 測試離開</button></div></div>`).join('').replace('border-top:1px solid var(--border);','')+`</div>`;
+  h+=`<div style="font-size:12px;color:var(--text3);margin:-4px 0 12px;">🧪 測試按鈕只會告訴你「現在觸發的話會做什麼」，不會真的打卡或修改紀錄。</div>`;
   h+=step(4,'怎麼運作',`・抵達教室：那間教室<b>今天有課</b>（泰順是有排班）才會打卡，路過不會誤打<br>・下班時間先用最後一堂課（或班表）的結束時間，離開時改成實際離開時間<br>・中途離開又回來，會接著計時<br>・健身房：抵達開始計時、離開結束；停留不到 10 分鐘當作路過<br>・打開網站時，系統會把全自動打的卡同步到 Notion，並排好泰順時數提醒`);
   w.innerHTML=h;
 }
@@ -4136,6 +4186,34 @@ async function syncAutoChecks(){
     try{await ckNotionUpsert(e);await ck('PATCH',`/events/${e.id}`,{extendedProperties:{private:{...e.extendedProperties.private,synced:'1'}}});}catch(err){console.warn(err);}
   }
   if(list.some(e=>e.extendedProperties.private.place===FORM_PLACE)) await syncFormReminder(twToday());
+}
+
+// ══════════ AI 指令（規則看不懂時，請 Gemini 幫忙翻譯）══════════
+let aiAvailable=null; // null=還不知道, false=Worker 沒設定金鑰
+async function aiParse(text){
+  if(aiAvailable===false) return null;
+  const ctx={today:twToday(),weekday:DAYS[(twNow().getUTCDay()+6)%7],
+    students:students.filter(s=>s.status!=='不上課').map(s=>s.nick?`${s.name}（${s.nick}）`:s.name)};
+  try{
+    const r=await fetch(AUTH_WORKER+'/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,context:ctx})});
+    const d=await r.json();
+    if(d.error==='no_key'){aiAvailable=false;return null;}
+    if(d.error) return {error:'AI 暫時無法使用：'+d.error};
+    aiAvailable=true;
+    if(!d.action||d.action==='unknown') return {error:d.message||'AI 也看不懂這句話，換個說法試試'};
+    const c={...d,ai:true};
+    if(d.student){
+      const st=students.find(s=>s.name===d.student)||findStudent(d.student);
+      if(!st||st.ambig) return {error:`AI 說的學生「${d.student}」找不到`};
+      c.student=st;
+    }else c.student=null;
+    if(c.duration) c.dur=parseInt(c.duration)||undefined;
+    if(c.action==='log'&&!c.dur&&c.student) c.dur=parseInt(c.student.duration||'60')||60;
+    if(c.action==='move'){c.newDate=d.newDate||null;c.newTime=d.newTime||null;}
+    if(c.action==='todo'&&!c.content) return {error:'AI 沒有抓到待辦內容'};
+    if(['leave','absent','restore','move','book','cancel','log'].includes(c.action)&&(!c.student||!c.date)) return {error:'AI 沒有抓到學生或日期'};
+    return c;
+  }catch(e){return {error:'AI 連線失敗'};}
 }
 
 function renderChangelog(){
@@ -4315,6 +4393,7 @@ function renderSettings(){
     setRow('📤','課程異動同步到 Notion','請假、停課、調課、補課、代課',null,`<button id="ch-sync-btn" style="${smallBtn('var(--text2)')}" onclick="syncChangesToNotion()">${chSyncText||'全部同步'}</button>`)+
     setRow('📦','匯出備份',lastBackup?`上次 ${lastBackup.replace(/-/g,'/')}・建議每月一次`:'還沒備份過・建議每月一次',null,`<button class="add-rec-btn" onclick="exportBackup()">備份</button>`)+
     setRow('🩺','系統檢查','檢查資料庫、欄位、日曆和資料',"showPage('health')")+
+    setRow('🤖','AI 指令',aiAvailable===false?'還沒設定 Gemini 金鑰（指令框規則看不懂時會用 AI）':'指令框規則看不懂時，自動請 AI 解讀',"showPage('aihelp')")+
     setRow('🔑','更換 Notion 權杖','權杖重新產生後使用','changeToken()')+
     (dupRecords().length?setRow('🧹','清除重複的上課紀錄',`${dupRecords().length} 筆重複`,null,`<button style="${smallBtn('var(--text2)')}" onclick="cleanDupRecords()">清除</button>`):'')+
     (records.some(r=>(r.note||'').trim())?setRow('🔀','合併舊紀錄的其他事項',`${records.filter(r=>(r.note||'').trim()).length} 筆紀錄還分開存`,null,`<button style="${smallBtn('var(--text2)')}" onclick="mergeOldNotes()">合併</button>`):''));
@@ -4539,7 +4618,7 @@ function showPage(id){
   if(document.getElementById('tab-'+id)) document.getElementById('tab-'+id).classList.add('active');
   curPage=id;
   {const hb=document.getElementById('header-bell');if(hb)hb.style.display=id==='home'?'':'none';}
-const titles={auto:'全自動打卡',gym:'健身紀錄',health:'系統檢查',feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
+const titles={aihelp:'AI 指令',auto:'全自動打卡',gym:'健身紀錄',health:'系統檢查',feed:'最新動態',help:'操作教學',rules:'計薪規則',changelog:'更新日誌',settings:'設定',subs:'代課紀錄',rooms:'教室',home:'首頁',schedule:'課表',students:'學生',detail:'學生資料',classroom:'教室',leaves:'請假紀錄',todo:'待寫紀錄',checkins:'打卡紀錄',salary:'薪資'};
   document.getElementById('header-title').textContent=titles[id]||'首頁';
   const btn=document.getElementById('header-btn');
   if(typeof toggleDial==='function'&&document.getElementById('dial')) toggleDial(false);
