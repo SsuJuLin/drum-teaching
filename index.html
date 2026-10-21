@@ -1070,8 +1070,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.21-2';
+const APP_VERSION='2026.10.21-3';
 const CHANGELOG=[
+  {v:'2026.10.21-3',items:['藝文鹿納的滿四堂改成「四堂裡大部分在哪個月就算哪個月」，平手算第四堂的月份；發薪日仍是第四堂那天']},
   {v:'2026.10.21-2',items:['所有通知（每日填紀錄、泰順時數）搬到獨立的「阿森｜通知」日曆，課表日曆只放真正的課']},
   {v:'2026.10.21-1',items:['學生搜尋欄可以查歌名：打歌名的一部分，就會列出點過這首歌的學生和狀態']},
   {v:'2026.10.09-1',items:['薪資頁泰順卡片新增「打卡對帳」：每天的打卡時數＋通勤、本月合計，方便對照公司薪資單','全自動打卡設定頁每個地點多了「🧪 測試抵達／測試離開」，只回報會做什麼，不會修改資料','AI 指令：指令框規則看不懂時，自動請 Gemini 解讀成指令（需在 Cloudflare 設定免費的 Gemini 金鑰）','程式整理：移除用不到的舊程式']},
@@ -2953,7 +2954,7 @@ async function renderSalary(silent){
     const startAll='2025-01-01';
     const tsChecks=silent?[]:await ck('GET','/events',null,[['privateExtendedProperty','kind=checkin'],['timeMin',twISO(first,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]).then(d=>(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.extendedProperties?.private?.place===FORM_PLACE)).catch(()=>[]);
     const [lessonsAll,rows]=await Promise.all([
-      gcalAll([['timeMin',twISO(startAll,'00:00')],['timeMax',twISO(next,'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
+      gcalAll([['timeMin',twISO(startAll,'00:00')],['timeMax',twISO(addDays(next,35),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','2500']]),
       querySalary().then(r=>{salaryErr='';return r;}).catch(e=>{salaryErr=e.message;return[];}),
     ]);
     if(!silent) salaryRows=rows;
@@ -2978,16 +2979,23 @@ async function renderSalary(silent){
         const off=k.startsWith('代:')?0:((students.find(s=>s.id===k)?.p4start||0)%4);
         for(let i=0;i<arr.length;i++){
           if((off+i+1)%4!==0) continue;
-          const done=arr[i];if(!inMonth(done))continue;
+          const done=arr[i];
           const grp=arr.slice(Math.max(0,i-3),i+1);
+          // 歸屬月份：這四堂大部分在哪個月就算哪個月（平手算第四堂那個月）；同步前的堂數依每週一堂往前推
+          const ds=grp.map(e=>evParts(e.start.dateTime).date);
+          for(let k=1;k<=4-grp.length;k++) ds.unshift(addDays(ds[0],-7));
+          const cnt={};ds.forEach(d=>{const m=d.slice(0,7);cnt[m]=(cnt[m]||0)+1;});
+          const doneM=evParts(done.start.dateTime).date.slice(0,7);
+          let bestM=doneM;Object.entries(cnt).forEach(([m,c])=>{if(c>(cnt[bestM]||0))bestM=m;});
+          if(bestM!==first.slice(0,7)) continue;
           const unit=lessonPay(done,per4Place);
           const pay=grp.reduce((a,e)=>a+lessonPay(e,per4Place),0)+(4-grp.length)*unit; // 同步前已上的堂數用同價補算
           const h=grp.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0)+(4-grp.length)*((new Date(done.end.dateTime)-new Date(done.start.dateTime))/3600000);
           x.lessons+=4;x.hours+=h;x.pay+=pay;
-          x.per4.push({name,date:evParts(done.start.dateTime).date,pay});
+          x.per4.push({name,date:evParts(done.start.dateTime).date,pay,shifted:doneM!==bestM});
         }
         const prog=(off+arr.length)%4;
-        if(prog&&evParts(arr[arr.length-1].start.dateTime).date>=first) x.per4.push({name,progress:prog});
+        if(prog&&evParts(arr[arr.length-1].start.dateTime).date>=first&&evParts(arr[arr.length-1].start.dateTime).date<next) x.per4.push({name,progress:prog});
       });
       if(x.per4.length||x.pay) places[per4Place]=x;
     }
@@ -2995,6 +3003,17 @@ async function renderSalary(silent){
     rows.filter(r=>r.type&&r.type!=='入帳'&&salaryMonthOf(r)===mk).forEach(r=>{const x=P(r.place||'其他');x.pay+=r.amount||0;x.extra.push(r);});
     // 收款：名稱開頭的月份，沒有的話用收到日期往前推一個月
     const paidRows=rows.filter(r=>r.type==='入帳'&&salaryMonthOf(r)===mk);
+    if(per4Place&&places[per4Place]){
+      for(const pk of places[per4Place].per4.filter(p=>!p.progress)){
+        const tag=`${pk.name}（${mdShort(pk.date)}）`;
+        const row=rows.find(r=>r.type==='入帳'&&(r.name||'').includes(tag)&&salaryMonthOf(r)!==mk);
+        if(row){
+          row.name=row.name.replace(/^\d{4}\s*[\/\-年.]\s*\d{1,2}/,mk);if(!row.name.startsWith(mk)) row.name=`${mk} ${row.name}`;
+          paidRows.push(row);
+          if(!silent) notionAPI('PATCH',`/pages/${row.id}`,{properties:{'名稱':{title:[{text:{content:row.name}}]}}}).catch(()=>{});
+        }
+      }
+    }
     // 這個地點這個月沒有任何課程資料（舊月份）→ 用收款金額當作應領
     paidRows.filter(r=>r.place).forEach(r=>{
       const x=P(r.place);
@@ -3034,7 +3053,7 @@ async function renderSalary(silent){
           if(p.progress) return`<div style="color:var(--text3);">${esc(p.name)} 進度 ${p.progress}/4</div>`;
           const tag=`${p.name}（${mdShort(p.date)}）`;
           const got=prs.find(r=>(r.name||'').includes(tag));
-          return`<div style="display:flex;align-items:center;gap:8px;padding:2px 0;"><div style="flex:1;min-width:0;">✅ ${esc(p.name)} 滿四堂（${mdShort(p.date)}）${money(p.pay)}</div>
+          return`<div style="display:flex;align-items:center;gap:8px;padding:2px 0;"><div style="flex:1;min-width:0;">✅ ${esc(p.name)} 滿四堂（${mdShort(p.date)}）${money(p.pay)}${p.shifted?'<span style="font-size:11px;color:var(--text3);">・多數堂在本月</span>':''}</div>
             ${got?`<span style="font-size:11px;color:var(--accent);white-space:nowrap;">已收 ${mdShort(got.date||'')}</span>`:(DB_SALARY?`<button class="add-rec-btn" style="padding:4px 10px;font-size:11px;" onclick="openPaid('${x.place}',${p.pay},'${mk}',null,'${esc(tag).replace(/'/g,'&#39;')}')">收到了</button>`:'')}</div>`;
         }).join('')}</div>`:''}
         ${x.extra.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.extra.map(r=>`＋ ${esc(r.type)}${r.name?'・'+esc(r.name):''} ${money(r.amount||0)}`).join('<br>')}</div>`:''}
@@ -3453,7 +3472,7 @@ const HELP=[
  {t:'💰 薪資',items:[
   ['泰順對帳','薪資頁泰順那張卡片，點「🕘 打卡對帳」展開每天的打卡時數和含通勤的時數，月底跟公司薪資單對照。'],
   ['應領怎麼算','時薪 × 實際上課時數；學生有特別時薪就用特別價；請假、老師停課不算；代課和體驗課照教室時薪。當月只算已上完的課。'],
-  ['藝文滿四堂','每位學生各自滿四堂發一次，同步日曆前已上的堂數填在學生的「藝文起始進度」。'],
+  ['藝文滿四堂','每位學生各自滿四堂發一次（第四堂當天收到）。這筆算在四堂裡大部分所在的月份，平手算第四堂的月份。同步日曆前已上的堂數填在學生的「藝文起始進度」。'],
   ['記錄收款','每收到一筆錢，就在那間教室按「＋ 記錄收款」，填金額和收到的日期。一個月可以記很多次，卡片會顯示「已收／應領」和每一筆。'],
   ['藝文收款','藝文每一筆「滿四堂」旁邊有「收到了」，按下去記錄那一筆，看得出哪幾位的錢還沒拿到。'],
   ['額外收入','「＋ 獎金／錄音案子／其他」記錄錄音室案子、紅包、獎金。'],
