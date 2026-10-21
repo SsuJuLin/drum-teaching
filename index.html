@@ -323,7 +323,7 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
     </div>
     <div class="page" id="page-students">
       <div id="stu-sticky" style="position:sticky;top:var(--hdr,68px);z-index:60;background:var(--bg);">
-      <div style="padding:10px 16px 0;"><input id="stu-search" type="search" placeholder="🔍 搜尋學生" oninput="renderStudents()" autocomplete="off" style="width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:6px 10px;font-family:inherit;font-size:13px;color:var(--text);outline:none;"></div>
+      <div style="padding:10px 16px 0;"><input id="stu-search" type="search" placeholder="🔍 搜尋學生或歌名" oninput="renderStudents()" autocomplete="off" style="width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:6px 10px;font-family:inherit;font-size:13px;color:var(--text);outline:none;"></div>
       <div class="filter-scroll" id="filter-scroll"></div>
       </div>
       <div class="student-items" id="student-items"></div>
@@ -1070,8 +1070,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.09-1';
+const APP_VERSION='2026.10.21-1';
 const CHANGELOG=[
+  {v:'2026.10.21-1',items:['學生搜尋欄可以查歌名：打歌名的一部分，就會列出點過這首歌的學生和狀態']},
   {v:'2026.10.09-1',items:['薪資頁泰順卡片新增「打卡對帳」：每天的打卡時數＋通勤、本月合計，方便對照公司薪資單','全自動打卡設定頁每個地點多了「🧪 測試抵達／測試離開」，只回報會做什麼，不會修改資料','AI 指令：指令框規則看不懂時，自動請 Gemini 解讀成指令（需在 Cloudflare 設定免費的 Gemini 金鑰）','程式整理：移除用不到的舊程式']},
   {v:'2026.10.08-4',items:['今日課程的泰順改名「泰順」，打卡後顯示實際時間和時數（含通勤），填完時數標「✅ 已填」','「記得填泰順時數」卡片改成下午 3 點後或已經離開才出現，填完就收進今日課程','泰順時數的離開後提醒改成依實際離開時間（iPhone 捷徑偵測到離開時）＋30 分鐘，還沒離開不會排','泰順時數提醒和每日填紀錄提醒時間相同時，合併成一則通知']},
   {v:'2026.10.08-3',items:['修正：iPhone 捷徑已經打過卡時，打開網站有機會再自動打一次卡，變成同一個地點兩筆打卡']},
@@ -3391,7 +3392,7 @@ const HELP=[
   ['＋ 排課','展開「＋ 加課」（幫某位學生多排一堂：補課、約課或體驗課）和「🔁 代課」。'],
  ]},
  {t:'👤 學生',items:[
-  ['搜尋與篩選','上方搜尋欄可以打名字或暱稱；篩選有各教室、約課制/體驗、暫停／不上課。'],
+  ['搜尋與篩選','上方搜尋欄可以打名字、暱稱或歌名（打一部分就可以，會列出點過那首歌的學生）；篩選有各教室、約課制/體驗、暫停／不上課。'],
   ['新增學生','右下「＋ 學生」。排課方式選「每週固定」會自動排進每週課表；「約課制」只有約好才出現。'],
   ['暱稱','可填好幾個，用空格分開。指令框、搜尋、匯出課表都會用暱稱。'],
   ['近期課程','學生頁列出最近一週內已上過的最後一堂（標示「已過」）和接下來 5 堂。每堂可以「調課」「請假」；已經過去的課只能請假或取消，事後才知道學生請假或曠課也能補登。'],
@@ -4875,6 +4876,9 @@ function renderStudents(){
 
   let list=students;
   const q=cleanName(document.getElementById('stu-search')?.value||'');
+  // 搜尋歌名：點過這首歌（打一部分也可以）的學生
+  const rawQ=(document.getElementById('stu-search')?.value||'').trim().toLowerCase().replace(/\s+/g,'');
+  const songHits=rawQ.length>=2?songs.filter(sg=>(sg.name||'').toLowerCase().replace(/\s+/g,'').includes(rawQ)):[];
   if(q) list=students.filter(s=>cleanName(s.name).includes(q)||nicksOf(s).some(n=>n.includes(q)));
   else if(stuFilter==='暫停/不上課') list=students.filter(s=>s.status==='暫停上課'||s.status==='不上課');
   else if(stuFilter==='約課制/體驗') list=students.filter(s=>isBooking(s)&&s.status!=='不上課');
@@ -4887,8 +4891,15 @@ function renderStudents(){
     students:list.filter(s=>s.day===d).sort((a,b)=>timeToMin(a.time)-timeToMin(b.time))
   })).filter(g=>g.students.length>0);
 
-  document.getElementById('student-items').innerHTML=grouped.length===0?
-    `<div style="text-align:center;padding:40px;color:var(--text3);">沒有學生</div>`:
+  const songHtml=songHits.length?`<div style="margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:0.1em;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px;">🎵 點了這首歌的學生</div>
+      ${songHits.map(sg=>{const st=students.find(x=>x.id===sg.sid);if(!st) return '';
+        return`<div class="student-row" onclick="openDetail('${st.id}','students')" style="margin-bottom:6px;">
+          <div class="s-avatar">${avatarHtml(st,44)}</div>
+          <div class="s-info"><div style="font-size:15px;font-weight:700;color:var(--text);">${esc(st.name)}</div>
+          <div style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🎵 ${esc(sg.name)}・<span style="color:${sg.status==='學會了'?'var(--accent)':sg.status==='練習中'?'#5aa9e6':'var(--text3)'};">${sg.status}</span>${sg.date?'・'+mdShort(sg.date)+' 點':''}</div></div></div>`;}).join('')}</div>`:'';
+  document.getElementById('student-items').innerHTML=songHtml+(grouped.length===0?
+    (songHtml?'':`<div style="text-align:center;padding:40px;color:var(--text3);">沒有學生</div>`):
     grouped.map(g=>`
       <div style="margin-bottom:4px;" id="stu-day-${DAYS.indexOf(g.day)}">
         <div style="position:sticky;top:calc(var(--hdr,68px) + var(--stuf,90px));z-index:50;background:var(--bg);font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;padding:6px 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px;">${g.day}</div>
@@ -4903,7 +4914,7 @@ function renderStudents(){
             <div style="width:8px;height:8px;border-radius:50%;background:${statusDot(s.status)};"></div>
           </div>
         </div>`).join('')}
-      </div>`).join('');
+      </div>`).join(''));
 }
 function setStuFilter(f){stuFilter=f;renderStudents();}
 function updateStickyVars(){
