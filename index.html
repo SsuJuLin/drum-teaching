@@ -1070,8 +1070,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.21-1';
+const APP_VERSION='2026.10.21-2';
 const CHANGELOG=[
+  {v:'2026.10.21-2',items:['所有通知（每日填紀錄、泰順時數）搬到獨立的「阿森｜通知」日曆，課表日曆只放真正的課']},
   {v:'2026.10.21-1',items:['學生搜尋欄可以查歌名：打歌名的一部分，就會列出點過這首歌的學生和狀態']},
   {v:'2026.10.09-1',items:['薪資頁泰順卡片新增「打卡對帳」：每天的打卡時數＋通勤、本月合計，方便對照公司薪資單','全自動打卡設定頁每個地點多了「🧪 測試抵達／測試離開」，只回報會做什麼，不會修改資料','AI 指令：指令框規則看不懂時，自動請 Gemini 解讀成指令（需在 Cloudflare 設定免費的 Gemini 金鑰）','程式整理：移除用不到的舊程式']},
   {v:'2026.10.08-4',items:['今日課程的泰順改名「泰順」，打卡後顯示實際時間和時數（含通勤），填完時數標「✅ 已填」','「記得填泰順時數」卡片改成下午 3 點後或已經離開才出現，填完就收進今日課程','泰順時數的離開後提醒改成依實際離開時間（iPhone 捷徑偵測到離開時）＋30 分鐘，還沒離開不會排','泰順時數提醒和每日填紀錄提醒時間相同時，合併成一則通知']},
@@ -1169,7 +1170,7 @@ function gcalConnect(){
 }
 function gcalClear(){gToken=null;gExp=0;try{localStorage.removeItem('gcal_token');}catch(e){}}
 function onGcalChange(){
-  if(curPage==='home') Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]).then(()=>{renderHome();autoCheckin(true);syncTodoReminders();});
+  if(curPage==='home') Promise.all([loadWeek(),loadToday(),loadReminder(),loadTodayChecks(),loadCheckinSettings()]).then(()=>{renderHome();autoCheckin(true);syncTodoReminders();migrateNotify();});
   if(curPage==='leaves') renderLeaves();
   if(curPage==='schedule') renderSchedule();
   if(curPage==='detail'&&curStudent) renderDetail(curStudent);
@@ -1333,6 +1334,8 @@ async function fetchWeek(mon){
   return weekFetching[mon];
 }
 // ── 泰順H14 排班：讀老闆的行事曆，只認標題是「林似儒」或「阿森」的行程（只讀不寫）──
+const NOTIFY_CAL='435ee4b795213759057647a3e1a1df0566ec74fe42bcddd7bd281942c541a241@group.calendar.google.com'; // 通知專用日曆
+const nf=(m,p,b,q)=>gcal(m,p,b,q,NOTIFY_CAL);
 const SHIFT_CAL='c_2bb04f82a408245d0d6578f485e7dc1123b0ce7e39cdfc7e03a923b45b7febb5@group.calendar.google.com';
 const SHIFT_NAMES=['林似儒','阿森'];
 const SHIFT_LABEL='泰順H14',SHIFT_PLACE='泰順錄音室';
@@ -1699,7 +1702,7 @@ let reminderEv=undefined;
 async function loadReminder(){
   if(!gcalValid()) return;
   try{
-    const d=await gcal('GET','/events',null,[['privateExtendedProperty','kind=reminder'],['maxResults','10']]);
+    const d=await nf('GET','/events',null,[['privateExtendedProperty','kind=reminder'],['maxResults','10']]);
     const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.recurrence);
     reminderEv=items[0]||null;
     let inited=false;try{inited=localStorage.getItem('reminder_init')==='1';}catch(e){}
@@ -1717,8 +1720,8 @@ function reminderBody(hhmm){
 async function setReminder(hhmm){
   try{localStorage.setItem('reminder_init','1');}catch(e){}
   try{
-    if(reminderEv) reminderEv=await gcal('PATCH',`/events/${reminderEv.id}`,{start:reminderBody(hhmm).start,end:reminderBody(hhmm).end});
-    else reminderEv=await gcal('POST','/events',reminderBody(hhmm));
+    if(reminderEv) reminderEv=await nf('PATCH',`/events/${reminderEv.id}`,{start:reminderBody(hhmm).start,end:reminderBody(hhmm).end});
+    else reminderEv=await nf('POST','/events',reminderBody(hhmm));
     showToast(`✅ 每天 ${hhmm} 提醒填寫紀錄`);
   }catch(e){showToast('❌ '+e.message);}
   if(curPage==='home') renderHome();
@@ -1726,7 +1729,7 @@ async function setReminder(hhmm){
 }
 async function toggleReminder(){
   if(reminderEv){
-    try{await gcal('DELETE',`/events/${reminderEv.id}`);reminderEv=null;showToast('已關閉每日提醒');}catch(e){showToast('❌ '+e.message);}
+    try{await nf('DELETE',`/events/${reminderEv.id}`);reminderEv=null;showToast('已關閉每日提醒');}catch(e){showToast('❌ '+e.message);}
     if(curPage==='home') renderHome();
     if(curPage==='settings') renderSettings();
   }else{
@@ -3111,11 +3114,13 @@ async function syncFormReminder(ds){
   try{
     const d=await ck('GET','/events',null,[['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true'],['orderBy','startTime']]);
     const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+    const nd=await nf('GET','/events',null,[['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true']]);
+    const nItems=(nd&&nd.items||[]).filter(e=>e.status!=='cancelled');
     const checks=items.filter(e=>e.extendedProperties?.private?.kind==='checkin'&&e.extendedProperties?.private?.place===FORM_PLACE);
-    const rem=items.filter(e=>e.extendedProperties?.private?.kind==='formReminder');
-    const rem2=items.filter(e=>e.extendedProperties?.private?.kind==='formReminder2');
+    const rem=nItems.filter(e=>e.extendedProperties?.private?.kind==='formReminder');
+    const rem2=nItems.filter(e=>e.extendedProperties?.private?.kind==='formReminder2');
     const done=checks.some(e=>e.extendedProperties?.private?.formDone==='1');
-    if(!checks.length||done||!formOn){for(const r of [...rem,...rem2]) await ck('DELETE',`/events/${r.id}`);syncDailyReminder();return;}
+    if(!checks.length||done||!formOn){for(const r of [...rem,...rem2]) await nf('DELETE',`/events/${r.id}`);syncDailyReminder();return;}
     const span=checks.map(e=>`${evParts(e.start.dateTime).hhmm}–${evParts(e.end.dateTime).hhmm}`).join('、');
     const hrs=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
     const summary=`⚠️ 記得填泰順時數（${span}・${formHoursText(hrs)}）`;
@@ -3125,11 +3130,11 @@ async function syncFormReminder(ds){
       transparency:'transparent',reminders:{useDefault:false,overrides:[{method:'popup',minutes:0}]},
       extendedProperties:{private:{kind:'formReminder',date:ds}}};
     const merged=reminderEv&&evParts(reminderEv.start.dateTime).hhmm===formTime;
-    if(merged){for(const r of rem) await ck('DELETE',`/events/${r.id}`);}   // 跟每日填紀錄同一時間 → 合併成一則（見 syncDailyReminder）
+    if(merged){for(const r of rem) await nf('DELETE',`/events/${r.id}`);}   // 跟每日填紀錄同一時間 → 合併成一則（見 syncDailyReminder）
     else if(rem.length){
-      if(rem[0].summary!==summary||evParts(rem[0].start.dateTime).hhmm!==formTime) await ck('PATCH',`/events/${rem[0].id}`,{summary,description:body.description,start:body.start,end:body.end});
-      for(const r of rem.slice(1)) await ck('DELETE',`/events/${r.id}`);
-    }else await ck('POST','/events',body);
+      if(rem[0].summary!==summary||evParts(rem[0].start.dateTime).hhmm!==formTime) await nf('PATCH',`/events/${rem[0].id}`,{summary,description:body.description,start:body.start,end:body.end});
+      for(const r of rem.slice(1)) await nf('DELETE',`/events/${r.id}`);
+    }else await nf('POST','/events',body);
     // 實際離開（按下班或捷徑偵測到離開）後 30 分鐘再提醒一次；還沒離開就不排
     const outs=checks.filter(e=>e.extendedProperties?.private?.checkedOut==='1');
     let want=null;
@@ -3141,9 +3146,9 @@ async function syncFormReminder(ds){
     if(want){
       const st=isoTW(want);
       const b2={...body,start:{dateTime:st,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(st,10),timeZone:'Asia/Taipei'},recurrence:undefined,extendedProperties:{private:{kind:'formReminder2',date:ds}}};
-      if(rem2.length){if(rem2[0].start.dateTime!==st||rem2[0].summary!==summary) await ck('PATCH',`/events/${rem2[0].id}`,{summary,start:b2.start,end:b2.end});for(const r of rem2.slice(1)) await ck('DELETE',`/events/${r.id}`);}
-      else await ck('POST','/events',b2);
-    }else{for(const r of rem2) if(new Date(r.start.dateTime).getTime()>Date.now()) await ck('DELETE',`/events/${r.id}`);}
+      if(rem2.length){if(rem2[0].start.dateTime!==st||rem2[0].summary!==summary) await nf('PATCH',`/events/${rem2[0].id}`,{summary,start:b2.start,end:b2.end});for(const r of rem2.slice(1)) await nf('DELETE',`/events/${r.id}`);}
+      else await nf('POST','/events',b2);
+    }else{for(const r of rem2) if(new Date(r.start.dateTime).getTime()>Date.now()) await nf('DELETE',`/events/${r.id}`);}
   }catch(e){console.warn('formReminder',e.message);}
   syncDailyReminder();
 }
@@ -3237,12 +3242,12 @@ async function syncDailyReminder(){
       const hrs=fc.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
       summary=needRec?`📝 填寫上課紀錄＋⚠️ 泰順時數（${span}・${formHoursText(hrs)}）`:`⚠️ 記得填泰順時數（${span}・${formHoursText(hrs)}）`;
     }
-    const d=await gcal('GET',`/events/${reminderEv.id}/instances`,null,[['timeMin',twISO(td,'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['showDeleted','true']]);
+    const d=await nf('GET',`/events/${reminderEv.id}/instances`,null,[['timeMin',twISO(td,'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['showDeleted','true']]);
     const inst=(d&&d.items||[])[0];
     if(!inst) return;
     const active=needRec||needForm;
-    if(!active){if(inst.status!=='cancelled') await gcal('PATCH',`/events/${inst.id}`,{status:'cancelled'});}
-    else if(inst.status==='cancelled'||inst.summary!==summary) await gcal('PATCH',`/events/${inst.id}`,{status:'confirmed',summary});
+    if(!active){if(inst.status!=='cancelled') await nf('PATCH',`/events/${inst.id}`,{status:'cancelled'});}
+    else if(inst.status==='cancelled'||inst.summary!==summary) await nf('PATCH',`/events/${inst.id}`,{status:'confirmed',summary});
   }catch(e){console.warn('dailyReminder',e.message);}
   finally{drBusy=false;if(drAgain){drAgain=false;setTimeout(syncDailyReminder,300);}}
 }
@@ -3457,7 +3462,7 @@ const HELP=[
  ]},
  {t:'🔔 提醒',items:[
   ['填寫上課紀錄','每天固定時間由 Google 日曆通知；當天的課都寫完了就不會通知。時間在設定頁調整。'],
-  ['收不到通知','手機的 Google 日曆 App 要勾選顯示「阿森Asen｜工作&爵士鼓教學系統」和「打卡紀錄」兩個日曆，並允許通知。'],
+  ['收不到通知','所有通知都在「阿森｜通知」日曆，手機的 Google 日曆 App 要勾選顯示這個日曆並允許通知。'],
  ]},
  {t:'🏋️ 健身紀錄',items:[
   ['在哪裡','設定 → 紀錄 →「健身紀錄」。'],
@@ -3888,6 +3893,28 @@ function todoAlertHtml(){
   }).join('');
 }
 let trBusy=false,trAgain=false;
+// 一次性搬家：把舊日曆裡的通知移到「阿森｜通知」日曆
+async function migrateNotify(){
+  try{if(localStorage.getItem('notify_migrated_v1')==='1') return;}catch(e){}
+  if(!gcalValid()) return;
+  try{
+    // 每日填紀錄提醒（原本在課程日曆）
+    const old=await gcal('GET','/events',null,[['privateExtendedProperty','kind=reminder'],['maxResults','10']]);
+    const olds=(old&&old.items||[]).filter(e=>e.status!=='cancelled'&&e.recurrence);
+    const hhmm=olds.length?evParts(olds[0].start.dateTime).hhmm:null;
+    for(const e of olds) await gcal('DELETE',`/events/${e.id}`);
+    // 泰順、待辦提醒（原本在打卡日曆）
+    for(const k of ['formReminder','formReminder2','todoReminder']){
+      const d=await ck('GET','/events',null,[['privateExtendedProperty',`kind=${k}`],['timeMin',new Date(Date.now()-86400000).toISOString()],['singleEvents','true'],['maxResults','100']]);
+      for(const e of (d&&d.items||[]).filter(e=>e.status!=='cancelled')) await ck('DELETE',`/events/${e.id}`);
+    }
+    reminderEv=null;await loadReminder();
+    if(hhmm&&!reminderEv) await setReminder(hhmm);
+    try{localStorage.setItem('notify_migrated_v1','1');}catch(e){}
+    await syncFormReminder(twToday());
+    showToast('📦 通知已搬到「阿森｜通知」日曆');
+  }catch(e){console.warn('migrateNotify',e.message);}
+}
 async function syncTodoReminders(){
   if(trBusy){trAgain=true;return;}
   if(!gcalValid()) return;
@@ -3896,19 +3923,19 @@ async function syncTodoReminders(){
     const now=Date.now();
     const want={};
     // 已取消前一天中午的手機通知：只清掉之前建立的提醒
-    const d=await ck('GET','/events',null,[['privateExtendedProperty','kind=todoReminder'],['timeMin',new Date(now-86400000).toISOString()],['singleEvents','true'],['maxResults','100']]);
+    const d=await nf('GET','/events',null,[['privateExtendedProperty','kind=todoReminder'],['timeMin',new Date(now-86400000).toISOString()],['singleEvents','true'],['maxResults','100']]);
     const have=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
     for(const e of have){
       const due=e.extendedProperties?.private?.due;
-      if(!want[due]){if(new Date(e.start.dateTime).getTime()>now) await ck('DELETE',`/events/${e.id}`);continue;}
+      if(!want[due]){if(new Date(e.start.dateTime).getTime()>now) await nf('DELETE',`/events/${e.id}`);continue;}
     }
     for(const [due,list] of Object.entries(want)){
       const names=list.map(t=>{const s=students.find(x=>x.id===t.sid);return `${t.text}（${s?s.name:'個人'}）`;});
       const summary=`⏰ 明天要用：${names.join('、')}`.slice(0,200);
       const start=twISO(addDays(due,-1),TODO_REMIND_TIME);
       const ex=have.find(e=>e.extendedProperties?.private?.due===due);
-      if(ex){if(ex.summary!==summary) await ck('PATCH',`/events/${ex.id}`,{summary});}
-      else await ck('POST','/events',{summary,description:names.join('\n'),start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,10),timeZone:'Asia/Taipei'},transparency:'transparent',reminders:{useDefault:false,overrides:[{method:'popup',minutes:0}]},extendedProperties:{private:{kind:'todoReminder',due}}});
+      if(ex){if(ex.summary!==summary) await nf('PATCH',`/events/${ex.id}`,{summary});}
+      else await nf('POST','/events',{summary,description:names.join('\n'),start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,10),timeZone:'Asia/Taipei'},transparency:'transparent',reminders:{useDefault:false,overrides:[{method:'popup',minutes:0}]},extendedProperties:{private:{kind:'todoReminder',due}}});
     }
   }catch(e){console.warn('todoReminders',e.message);}
   finally{trBusy=false;if(trAgain){trAgain=false;setTimeout(syncTodoReminders,300);}}
@@ -3961,7 +3988,7 @@ async function runHealth(){
     }catch(e){add(false,`${db.name}：讀不到`,/404/.test(e.message)?'這個資料庫還沒「連接」爵士鼓教學系統，或已被刪除':e.message);}
   }
   // 日曆
-  const cals=[[GCAL_ID,'課程日曆'],[CHECKIN_CAL_ID,'打卡紀錄日曆'],[SHIFT_CAL,'泰順排班（老闆的行事曆）'],[HOLIDAY_CAL,'台灣國定假日']];
+  const cals=[[GCAL_ID,'課程日曆'],[CHECKIN_CAL_ID,'打卡紀錄日曆'],[NOTIFY_CAL,'通知日曆（阿森｜通知）'],[SHIFT_CAL,'泰順排班（老闆的行事曆）'],[HOLIDAY_CAL,'台灣國定假日']];
   if(!gcalValid()) await ensureGcal();
   if(!gcalValid()) add(false,'Google 日曆未連接','到設定 → 連線與同步 → Google 日曆按「連接」');
   else{
