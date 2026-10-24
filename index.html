@@ -503,11 +503,18 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
     <div class="sheet-handle"></div>
     <div class="sheet-title">🏖 老師請假</div>
     <div class="sheet-body">
+      <div style="display:flex;gap:6px;margin-bottom:12px;"><button class="chip active" id="lv-mode-day" onclick="setLeaveMode('day')">整天</button><button class="chip" id="lv-mode-time" onclick="setLeaveMode('time')">指定時段</button></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">開始日期</label><input class="form-input" type="date" id="leave-start" onchange="if(document.getElementById('leave-end').value<this.value)document.getElementById('leave-end').value=this.value"></div>
-        <div class="form-group"><label class="form-label">結束日期</label><input class="form-input" type="date" id="leave-end"></div>
+        <div class="form-group lv-time" style="display:none;"><label class="form-label">從幾點</label><input class="form-input" type="time" id="leave-st"></div>
       </div>
-      <div class="form-group"><label class="form-label">事由（選填）</label><input class="form-input" id="leave-note" placeholder="例如：中國出差"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">結束日期</label><input class="form-input" type="date" id="leave-end"></div>
+        <div class="form-group lv-time" style="display:none;"><label class="form-label">到幾點</label><input class="form-input" type="time" id="leave-et"></div>
+      </div>
+      <div class="form-group"><label class="form-label">事由（選填）</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"><button class="chip" onclick="document.getElementById('leave-note').value='颱風假'">颱風假</button><button class="chip" onclick="document.getElementById('leave-note').value='出差'">出差</button><button class="chip" onclick="document.getElementById('leave-note').value='演出'">演出</button><button class="chip" onclick="document.getElementById('leave-note').value='生病'">生病</button></div>
+        <input class="form-input" id="leave-note" placeholder="可以自己輸入"></div>
       <div style="font-size:12px;color:var(--text3);margin:-4px 0 14px;line-height:1.6;">期間內的課會標記為「老師停課」（不算學生請假、不需補課），期間也無法新增約課或補課。</div>
       <div class="form-label" style="margin-bottom:8px;">已登記的請假</div>
       <div id="leave-list"></div>
@@ -1071,8 +1078,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.23-1';
+const APP_VERSION='2026.10.23-2';
 const CHANGELOG=[
+  {v:'2026.10.23-2',items:['老師請假可以選「指定時段」：從某天幾點到某天幾點，只有這段時間內的課會停課，例如上完早上的課再請假','課表上指定時段的請假只會在那段時間畫斜線；請假期間外的時段照常可以排課','請假事由多了快速選項：颱風假、出差、演出、生病']},
   {v:'2026.10.23-1',items:['待辦事項可以編輯：點文字打開，可以改內容、學生、期限，也可以刪除','待辦的期限會跟著課走：期限那天的課被請假、停課、代課、調走或取消，自動延到下一堂課']},
   {v:'2026.10.21-3',items:['藝文鹿納的滿四堂改成「四堂裡大部分在哪個月就算哪個月」，平手算第四堂的月份；發薪日仍是第四堂那天']},
   {v:'2026.10.21-2',items:['所有通知（每日填紀錄、泰順時數）搬到獨立的「阿森｜通知」日曆，課表日曆只放真正的課']},
@@ -1328,7 +1336,7 @@ async function fetchWeek(mon){
       const all=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
       weekCache[mon]={at:Date.now(),
         events:all.filter(e=>e.start&&e.start.dateTime&&e.extendedProperties?.private?.kind!=='reminder'),
-        leaves:all.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start&&e.start.date),
+        leaves:all.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start&&(e.start.date||e.start.dateTime)),
         shifts:sh||[],
         holidays:(hd&&hd.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.date).map(e=>({date:e.start.date,end:e.end?.date,name:e.summary||'',desc:e.description||''}))};
       return weekCache[mon];
@@ -1619,12 +1627,12 @@ async function renderLeaves(){
         <div style="flex:1;font-size:13px;color:var(--text2);">${yr} 年共請假 <b style="color:var(--text);">${yrDays}</b> 天</div>
         <button style="${smallBtn('var(--text2)')}" onclick="reapplyButton()">重新套用</button>
         <button class="add-rec-btn" onclick="openLeave()">＋ 請假</button></div>`;
-      html+=groupByMonth(items,e=>e.start.date,e=>{
+      html+=groupByMonth(items,e=>e.start.date||evParts(e.start.dateTime).date,e=>{
         const days=leaveDays(e);const pr=e.extendedProperties?.private||{};
         return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:14px;font-weight:700;color:var(--text);">🏖 ${fmtMD(days[0])}${days.length>1?' – '+fmtMD(days[days.length-1]):''}</div>
-            <div style="font-size:11px;color:var(--text3);">${days.length} 天${pr.note?' · '+pr.note:''} · 停課 ${parseInt(pr.count||'0')} 堂</div>
+            <div style="font-size:14px;font-weight:700;color:var(--text);">🏖 ${leaveRangeText(e)}</div>
+            <div style="font-size:11px;color:var(--text3);">${isTimedLeave(e)?'指定時段':days.length+' 天'}${pr.note?' · '+pr.note:''} · 停課 ${parseInt(pr.count||'0')} 堂</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0;"><button onclick="openCover('${e.id}')" style="${smallBtn('#9b8cff')}">代課安排</button><button onclick="cancelLeave('${e.id}')" style="${smallBtn('var(--accent)')}">取消請假</button></div></div>`;
       })||`<div class="rec-empty">還沒有請假紀錄</div>`;
@@ -1787,7 +1795,7 @@ async function saveBooking(){
   if(!ds||!tm){showToast('請選擇日期與時間');return;}
   const btn=document.getElementById('save-book-btn');btn.disabled=true;btn.textContent=rescheduleEvId?'調課中…':'建立中…';
   try{
-    if(await isTeacherOnLeave(ds)){showToast(`❌ ${fmtMD(ds)} 你已請假，不能排課`);btn.disabled=false;btn.textContent=rescheduleEvId?'✅ 確定調課':'✅ 建立';return;}
+    if(await isTeacherOnLeave(ds,tm,dur)){showToast(`❌ ${fmtMD(ds)} ${tm} 你已請假，不能排課`);btn.disabled=false;btn.textContent=rescheduleEvId?'✅ 確定調課':'✅ 建立';return;}
     if(rescheduleEvId){
       const ev=evCache[rescheduleEvId];
       const start=twISO(ds,tm);
@@ -1813,16 +1821,42 @@ async function saveBooking(){
 }
 // ── 老師請假（期間內的課全部取消，可一鍵恢復）──
 let weekLeaves=[];
-function leaveDays(ev){ // 回傳此請假涵蓋的日期陣列
-  const out=[];let d=ev.start.date;const end=ev.end.date;
-  while(d&&d<end&&out.length<400){out.push(d);d=addDays(d,1);}
+function leaveDays(ev){ // 回傳此請假涵蓋的日期陣列（整天或指定時段都可以）
+  const out=[];
+  if(ev.start?.date){let d=ev.start.date;const end=ev.end.date;while(d&&d<end&&out.length<400){out.push(d);d=addDays(d,1);}return out;}
+  if(!ev.start?.dateTime) return out;
+  let d=evParts(ev.start.dateTime).date;const e=evParts(ev.end.dateTime);
+  const last=e.hhmm==='00:00'?addDays(e.date,-1):e.date;
+  while(d<=last&&out.length<400){out.push(d);d=addDays(d,1);}
   return out;
 }
+function isTimedLeave(ev){return !!ev.start?.dateTime;}
+// 這堂課有沒有落在這次請假裡
+function leaveCovers(lev,lesson){
+  if(!lesson.start?.dateTime) return false;
+  if(!isTimedLeave(lev)) return leaveDays(lev).includes(evParts(lesson.start.dateTime).date);
+  return new Date(lesson.start.dateTime)<new Date(lev.end.dateTime)&&new Date(lesson.end.dateTime)>new Date(lev.start.dateTime);
+}
+function leaveRangeText(ev){
+  const days=leaveDays(ev);
+  if(!isTimedLeave(ev)) return `${fmtMD(days[0])}${days.length>1?' – '+fmtMD(days[days.length-1]):''}`;
+  const a=evParts(ev.start.dateTime),b=evParts(ev.end.dateTime);
+  return a.date===b.date?`${fmtMD(a.date)} ${a.hhmm}–${b.hhmm}`:`${fmtMD(a.date)} ${a.hhmm} – ${fmtMD(b.date)} ${b.hhmm}`;
+}
+function setLeaveMode(m){
+  leaveMode=m;
+  document.getElementById('lv-mode-day').classList.toggle('active',m==='day');
+  document.getElementById('lv-mode-time').classList.toggle('active',m==='time');
+  document.querySelectorAll('.lv-time').forEach(el=>el.style.display=m==='time'?'':'none');
+}
+let leaveMode='day';
 function openLeave(){
   if(!gcalValid()){showToast('請先連接 Google 日曆');gcalConnect();return;}
   document.getElementById('leave-start').value=twToday();
   document.getElementById('leave-end').value=twToday();
   document.getElementById('leave-note').value='';
+  document.getElementById('leave-st').value='12:00';document.getElementById('leave-et').value='23:59';
+  setLeaveMode('day');
   document.getElementById('sheet-leave').classList.add('show');
   loadLeaves();
 }
@@ -1839,7 +1873,7 @@ async function loadLeaves(){
         const n=parseInt(pr.count||'0');
         return`<div class="rec-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:14px;font-weight:700;color:var(--text);">${fmtMD(days[0])}${days.length>1?' – '+fmtMD(days[days.length-1]):''}</div>
+            <div style="font-size:14px;font-weight:700;color:var(--text);">${leaveRangeText(ev)}</div>
             <div style="font-size:11px;color:var(--text3);">${pr.note?pr.note+' · ':''}取消了 ${n} 堂課</div>
           </div>
           <button onclick="cancelLeave('${ev.id}')" style="background:transparent;border:1px solid var(--border2);color:var(--accent);border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">取消請假</button>
@@ -1852,15 +1886,20 @@ async function saveLeave(){
   const note=document.getElementById('leave-note').value.trim();
   if(!ds||!de){showToast('請選擇日期');return;}
   if(de<ds){showToast('結束日期不能早於開始日期');return;}
+  const timed=leaveMode==='time';
+  const st=document.getElementById('leave-st').value||'00:00',et=document.getElementById('leave-et').value||'23:59';
+  const sISO=twISO(ds,timed?st:'00:00'),eISO=timed?twISO(de,et):twISO(addDays(de,1),'00:00');
+  if(new Date(eISO)<=new Date(sISO)){showToast('結束時間要晚於開始時間');return;}
   const btn=document.getElementById('save-leave-btn');btn.disabled=true;btn.textContent='查詢課程中…';
   let lessons=[];
   try{
     const d=await gcal('GET','/events',null,[['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(de,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','250']]);
-    lessons=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&e.extendedProperties?.private?.studentId&&!evState(e));
+    lessons=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&e.extendedProperties?.private?.studentId&&!evState(e)
+      &&new Date(e.start.dateTime)<new Date(eISO)&&new Date(e.end.dateTime)>new Date(sISO));
   }catch(e){showToast('❌ '+e.message);btn.disabled=false;btn.textContent='✅ 確定請假';return;}
   btn.disabled=false;btn.textContent='✅ 確定請假';
   const names=[...new Set(lessons.map(e=>(e.summary||'').replace('🥁 ','')))];
-  const range=ds===de?fmtMD(ds):`${fmtMD(ds)} – ${fmtMD(de)}`;
+  const range=timed?(ds===de?`${fmtMD(ds)} ${st}–${et}`:`${fmtMD(ds)} ${st} – ${fmtMD(de)} ${et}`):(ds===de?fmtMD(ds):`${fmtMD(ds)} – ${fmtMD(de)}`);
   showConfirm('確認請假',`${range}，共 ${lessons.length} 堂課會標記為「老師停課」${names.length?'：'+names.join('、'):''}。之後可按「取消請假」恢復。`,async()=>{
     btn.disabled=true;
     const ids=[];let fail=0;
@@ -1876,7 +1915,7 @@ async function saveLeave(){
     try{
       const lev=await gcal('POST','/events',{
         summary:`🏖 老師請假${note?'｜'+note:''}`,description:'由爵士鼓教學系統建立',
-        start:{date:ds},end:{date:addDays(de,1)},transparency:'transparent',
+        ...(timed?{start:{dateTime:sISO,timeZone:'Asia/Taipei'},end:{dateTime:eISO,timeZone:'Asia/Taipei'}}:{start:{date:ds},end:{date:addDays(de,1)}}),transparency:'transparent',
         extendedProperties:{private:priv},
       });
       if(lev) chTeacherLeave(lev);
@@ -1908,9 +1947,13 @@ function cancelLeave(evId){
     }catch(e){showToast('❌ '+e.message);}
   },'取消請假');
 }
-async function isTeacherOnLeave(ds){
+async function isTeacherOnLeave(ds,hhmm,dur){
   const d=await gcal('GET','/events',null,[['privateExtendedProperty','kind=teacherLeave'],['timeMin',twISO(ds,'00:00')],['timeMax',twISO(addDays(ds,1),'00:00')],['singleEvents','true']]);
-  return (d&&d.items||[]).some(e=>e.status!=='cancelled');
+  const lv=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
+  if(!lv.length) return false;
+  if(!hhmm) return lv.some(e=>!isTimedLeave(e));   // 不知道時間時，只有整天請假才擋
+  const st=twISO(ds,hhmm);const fake={start:{dateTime:st},end:{dateTime:plusMin(st,dur||60)}};
+  return lv.some(e=>leaveCovers(e,fake));
 }
 
 // ══════════ 指令輸入（A：規則解析；之後 B 的 AI 只要回傳同樣格式即可接上）══════════
@@ -2162,7 +2205,7 @@ async function confirmCommand(){
     else if(c.action==='restore') await markEvent(c.ev,'');
     else if(c.action==='cancel'){await gcal('DELETE',`/events/${c.ev.id}`);chDelete(`${c.ev.id}|補課`);}
     else if(c.action==='move'){
-      if(await isTeacherOnLeave(c.newDate)) throw new Error(`${fmtMD(c.newDate)} 你已請假，不能排課`);
+      if(await isTeacherOnLeave(c.newDate,c.newTime,Math.round((new Date(c.ev.end.dateTime)-new Date(c.ev.start.dateTime))/60000))) throw new Error(`${fmtMD(c.newDate)} 你已請假，不能排課`);
       const ev=c.ev;const start=twISO(c.newDate,c.newTime);
       const wasOff=evState(ev)==='teacherOff';
       const pr={...(ev.extendedProperties?.private||{}),moved:'1'};
@@ -2177,7 +2220,7 @@ async function confirmCommand(){
       body.extendedProperties.private.logged='1';body.description='補登課程（爵士鼓教學系統）';
       await gcal('POST','/events',body);
     }else if(c.action==='book'){
-      if(await isTeacherOnLeave(c.date)) throw new Error(`${fmtMD(c.date)} 你已請假，不能排課`);
+      if(await isTeacherOnLeave(c.date,c.time,c.dur)) throw new Error(`${fmtMD(c.date)} 你已請假，不能排課`);
       const body=evBody(s,c.date,c.time,c.dur,'booking');
       if(!isBooking(s)){body.extendedProperties.private.makeup='1';body.description='補課（爵士鼓教學系統）';}
       const made=await gcal('POST','/events',body);
@@ -2248,7 +2291,7 @@ async function buildExport(){
     const expShifts=await fetchShifts(ds,end);
     if(seq!==exportSeq) return;
     const lessons=items.filter(e=>e.start?.dateTime&&(e.extendedProperties?.private?.studentId||isSub(e)));
-    const tLeaves=items.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start?.date);
+    const tLeaves=items.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&(e.start?.date||e.start?.dateTime));
     const out=[];
     for(let i=0;i<days;i++){
       const day=addDays(ds,i);
@@ -2262,7 +2305,7 @@ async function buildExport(){
       all.push(...shiftItems);all.sort((a,b)=>a.st-b.st||a.en-b.en);
       // 請假、停課的時段顯示成空白；若已被別人的課佔用就不列
       const act=all.filter(x=>!x.empty||!all.some(y=>!y.empty&&y.st<x.en&&y.en>x.st));
-      const off=tLeaves.some(e=>leaveDays(e).includes(day));
+      const off=tLeaves.some(e=>!isTimedLeave(e)&&leaveDays(e).includes(day));
       if(!act.some(x=>!x.empty)){out.push(off?'（老師請假）':'（沒有課）');out.push('');continue;}
       const hourOnly=act.every(x=>x.st%60===0&&x.en%60===0);
       let cur=act[0].st;
@@ -2296,7 +2339,7 @@ async function buildExport(){
       lessons.filter(e=>evState(e)==='absent'&&inCh(evParts(e.start.dateTime).date)).forEach(e=>lines.push({k:evParts(e.start.dateTime).date,t:`${shortName(evName(e))} ${mdShort(evParts(e.start.dateTime).date)} 曠課`}));
       // 老師請假
       tLeaves.forEach(e=>{const dd=leaveDays(e).filter(inCh);if(!dd.length)return;const note=e.extendedProperties.private.note;
-        lines.push({k:dd[0],t:`老師 ${mdShort(dd[0])}${dd.length>1?'-'+mdShort(dd[dd.length-1]):''} 請假${note?'（'+note+'）':''}`});});
+        lines.push({k:dd[0],t:isTimedLeave(e)?`老師 ${leaveRangeText(e).replace(/ 週./g,'')} 請假${note?'（'+note+'）':''}`:`老師 ${mdShort(dd[0])}${dd.length>1?'-'+mdShort(dd[dd.length-1]):''} 請假${note?'（'+note+'）':''}`});});
       lines.sort((a,b)=>a.k<b.k?-1:a.k>b.k?1:0);
       if(lines.length) out.push(...lines.map(x=>x.t));
     }
@@ -2368,7 +2411,7 @@ async function saveSubNew(){
   if(!ds||!tm||!stu){showToast('請填日期、時間和學生');return;}
   const btn=document.getElementById('save-sub-btn');btn.disabled=true;btn.textContent='建立中…';
   try{
-    if(await isTeacherOnLeave(ds)) throw new Error(`${fmtMD(ds)} 你已請假`);
+    if(await isTeacherOnLeave(ds,tm,parseInt(document.getElementById('sub-dur')?.value)||60)) throw new Error(`${fmtMD(ds)} ${tm} 你已請假`);
     const start=twISO(ds,tm);
     const subMade=await gcal('POST','/events',{
       summary:`🔁 代課｜${stu}${teacher?'（'+teacher+'）':''}`,location:room,
@@ -3342,7 +3385,7 @@ async function syncChangesToNotion(){
     const jobs=[];
     items.forEach(e=>{
       const pr=e.extendedProperties?.private||{};
-      if(pr.kind==='teacherLeave'&&e.start?.date) jobs.push(()=>chTeacherLeave(e));
+      if(pr.kind==='teacherLeave'&&(e.start?.date||e.start?.dateTime)) jobs.push(()=>chTeacherLeave(e));
       if(!e.start?.dateTime) return;
       const st=evState(e);
       if(st) jobs.push(()=>chLesson(e,CH_TYPES[st]));
@@ -3436,7 +3479,7 @@ const HELP=[
   ['曠課','在請假視窗按「🚷 記為曠課」：照常計薪、不用補課。如果曠課要算順延（例如初犯），改用「確定請假」並選理由「曠課」。'],
   ['調課','只移動那一堂，之後每週照常。'],
   ['補課','學生頁「＋ 補課」或課表「＋ 加課」。學生頁會顯示請假次數，補不補課由你決定。'],
-  ['老師請假','首頁「＋ 請假」，選日期和事由。期間的課會變成「⛔ 老師停課」，不算學生請假、不需補課；期間也無法排課。'],
+  ['老師請假','首頁「＋ 請假」，選「整天」或「指定時段」（從某天幾點到某天幾點，例如上完早上的課再請假），事由可以點快速選項。期間的課會變成「⛔ 老師停課」，不算學生請假、不需補課；期間也無法排課。'],
   ['停課改期','老師停課的課可以按「調課」改到其他日期，會恢復成正常上課。'],
   ['取消請假','設定 → 請假紀錄 → 我的請假 →「取消請假」，停課的課會全部恢復。'],
   ['代課安排','請假後老闆安排好代課老師，到設定 → 請假紀錄 → 我的請假 →「代課安排」，在每間教室填上老師名字按「套用」。那幾堂改成他人代課，不算你的薪水。'],
@@ -4601,7 +4644,7 @@ async function reapplyLeave(lev){
   const from=days[0]>twToday()?days[0]:twToday();
   if(from>=end) return 0;
   const d=await gcal('GET','/events',null,[['timeMin',twISO(from,'00:00')],['timeMax',twISO(end,'00:00')],['singleEvents','true'],['maxResults','250']]);
-  const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&e.extendedProperties?.private?.studentId&&!evState(e));
+  const items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime&&e.extendedProperties?.private?.studentId&&!evState(e)&&leaveCovers(lev,e));
   if(!items.length) return 0;
   const added=[];
   for(const e of items){try{await markEvent(e,'teacherOff');added.push(e.id);}catch(err){console.warn(err);}}
@@ -4619,7 +4662,7 @@ async function reapplyLeave(lev){
 async function reapplyAllLeaves(){
   try{
     const d=await gcal('GET','/events',null,[['privateExtendedProperty','kind=teacherLeave'],['timeMin',twISO(twToday(),'00:00')],['singleEvents','true'],['maxResults','50']]);
-    let n=0;for(const lev of (d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.date)) n+=await reapplyLeave(lev);
+    let n=0;for(const lev of (d&&d.items||[]).filter(e=>e.status!=='cancelled'&&(e.start?.date||e.start?.dateTime))) n+=await reapplyLeave(lev);
     if(n){weekKey=null;weekCache={};todayKey=null;}
     return n;
   }catch(e){console.warn('reapplyAllLeaves',e.message);return 0;}
@@ -4912,9 +4955,18 @@ function renderSchedule(){
   });
 
   const COL=`((100% - 36px) / ${SHOW.length})`;
-  const leaveIdx=new Set();
-  if(calReady) weekLeaves.forEach(ev=>leaveDays(ev).forEach(d=>{const i=colOf(weekDates.indexOf(d));if(i>=0&&weekDates.indexOf(d)>=0)leaveIdx.add(i);}));
-  const leaveBlocks=[...leaveIdx].map(i=>`<div style="position:absolute;top:0;bottom:0;left:calc(36px + ${i} * ${COL});width:calc(${COL});background:repeating-linear-gradient(45deg,rgba(200,168,74,0.10) 0 6px,transparent 6px 12px);border-left:1px solid rgba(200,168,74,0.35);z-index:1;pointer-events:none;"><div style="text-align:center;font-size:10px;font-weight:700;color:#c8a84a;padding-top:4px;">🏖 請假</div></div>`).join('');
+  const leaveIdx=new Set();const leaveParts=[];
+  if(calReady) weekLeaves.forEach(ev=>leaveDays(ev).forEach(d=>{
+    const wi=weekDates.indexOf(d);const i=colOf(wi);if(wi<0||i<0) return;
+    if(!isTimedLeave(ev)){leaveIdx.add(i);return;}
+    const a=new Date(ev.start.dateTime).getTime(),b=new Date(ev.end.dateTime).getTime();
+    const d0=new Date(twISO(d,'00:00')).getTime();
+    const from=Math.max(a,d0),to=Math.min(b,d0+86400000);
+    const fm=(from-d0)/60000,tm=(to-d0)/60000;
+    const top=Math.max(0,(fm-START_H*60)/60*ROW_H),bot=Math.min(totalH,(tm-START_H*60)/60*ROW_H);
+    if(bot>top) leaveParts.push({i,top,h:bot-top});
+  }));
+  const leaveBlocks=[...[...leaveIdx].map(i=>({i,top:0,h:null})),...leaveParts].map(({i,top,h})=>`<div style="position:absolute;top:${top}px;${h===null?'bottom:0':'height:'+h+'px'};left:calc(36px + ${i} * ${COL});width:calc(${COL});background:repeating-linear-gradient(45deg,rgba(200,168,74,0.10) 0 6px,transparent 6px 12px);border-left:1px solid rgba(200,168,74,0.35);z-index:1;pointer-events:none;"><div style="text-align:center;font-size:10px;font-weight:700;color:#c8a84a;padding-top:4px;">🏖 請假</div></div>`).join('');
   const studentBlocks=evs.map(e=>{
     const {s,norm,dur,k,n,booking,state}=e;
     const dayIdx=colOf(e.dayIdx);if(dayIdx<0) return '';
