@@ -1078,8 +1078,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.23-2';
+const APP_VERSION='2026.10.25-1';
 const CHANGELOG=[
+  {v:'2026.10.25-1',items:['修正：指定時段的老師請假被當成一堂課顯示在課表上，讓那天的課變窄、錯位；現在跟整天請假一樣只顯示斜線']},
   {v:'2026.10.23-2',items:['老師請假可以選「指定時段」：從某天幾點到某天幾點，只有這段時間內的課會停課，例如上完早上的課再請假','課表上指定時段的請假只會在那段時間畫斜線；請假期間外的時段照常可以排課','請假事由多了快速選項：颱風假、出差、演出、生病']},
   {v:'2026.10.23-1',items:['待辦事項可以編輯：點文字打開，可以改內容、學生、期限，也可以刪除','待辦的期限會跟著課走：期限那天的課被請假、停課、代課、調走或取消，自動延到下一堂課']},
   {v:'2026.10.21-3',items:['藝文鹿納的滿四堂改成「四堂裡大部分在哪個月就算哪個月」，平手算第四堂的月份；發薪日仍是第四堂那天']},
@@ -1335,7 +1336,7 @@ async function fetchWeek(mon){
       const [d,hd,sh]=await Promise.all([gcal('GET','/events',null,q),gcal('GET','/events',null,q,HOLIDAY_CAL).catch(()=>null),fetchShifts(mon,addDays(mon,7))]);
       const all=(d&&d.items||[]).filter(e=>e.status!=='cancelled');
       weekCache[mon]={at:Date.now(),
-        events:all.filter(e=>e.start&&e.start.dateTime&&e.extendedProperties?.private?.kind!=='reminder'),
+        events:all.filter(e=>e.start&&e.start.dateTime&&!['reminder','teacherLeave'].includes(e.extendedProperties?.private?.kind)),
         leaves:all.filter(e=>e.extendedProperties?.private?.kind==='teacherLeave'&&e.start&&(e.start.date||e.start.dateTime)),
         shifts:sh||[],
         holidays:(hd&&hd.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.date).map(e=>({date:e.start.date,end:e.end?.date,name:e.summary||'',desc:e.description||''}))};
