@@ -1078,8 +1078,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.25-2';
+const APP_VERSION='2026.10.27-1';
 const CHANGELOG=[
+  {v:'2026.10.27-1',items:['修正：現在時間的紅線被泰順的班蓋住，紅線改回顯示在最上層']},
   {v:'2026.10.25-2',items:['課表上泰順的班一律顯示在最上層，老師請假的斜線不會再蓋住它','操作教學更新：課表標示說明、捷徑測試按鈕、每晚自動檢查提醒']},
   {v:'2026.10.25-1',items:['修正：指定時段的老師請假被當成一堂課顯示在課表上，讓那天的課變窄、錯位；現在跟整天請假一樣只顯示斜線']},
   {v:'2026.10.23-2',items:['老師請假可以選「指定時段」：從某天幾點到某天幾點，只有這段時間內的課會停課，例如上完早上的課再請假','課表上指定時段的請假只會在那段時間畫斜線；請假期間外的時段照常可以排課','請假事由多了快速選項：颱風假、出差、演出、生病']},
@@ -1387,7 +1388,7 @@ function nowLineHtml(){
   const di=schedMode==='day'?0:(n.getUTCDay()+6)%7;
   const COL=`((100% - 36px) / ${schedMode==='day'?1:7})`;
   const top=(min-START_H*60)/60*ROW_H;
-  return`<div style="position:absolute;top:${top}px;left:calc(36px + ${di} * ${COL});width:calc(${COL});height:0;border-top:2px solid #e5484d;z-index:20;pointer-events:none;">
+  return`<div style="position:absolute;top:${top}px;left:calc(36px + ${di} * ${COL});width:calc(${COL});height:0;border-top:2px solid #e5484d;z-index:25;pointer-events:none;">
     <div style="position:absolute;left:-5px;top:-6px;width:10px;height:10px;border-radius:50%;background:#e5484d;"></div></div>`;
 }
 let scheduleScrollPending=false;
