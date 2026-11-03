@@ -425,6 +425,9 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
         <div class="form-group"><label class="form-label">藝文起始進度</label><input class="form-input" type="number" inputmode="numeric" min="0" max="3" id="stu-p4" placeholder="只有藝文要填"></div>
       </div>
       <div class="form-row">
+        <div class="form-group"><label class="form-label">特別時薪（元／小時）</label><input class="form-input" type="number" inputmode="numeric" min="0" id="stu-rate" placeholder="沒有就留空，用教室預設"></div>
+      </div>
+      <div class="form-row">
         <div class="form-group"><label class="form-label">教室</label>
           <select class="form-select" id="stu-room" onchange="updateDays()">
             <option>楊梅宏音 Yamaha</option><option>林口星玥</option><option>內壢奧莉琪</option><option>藝文鹿納</option>
@@ -914,7 +917,7 @@ function gp(page,name,type){
   return '';
 }
 
-let HAS_BOOKING_FIELD=false,HAS_NICK_FIELD=false,HAS_START_FIELD=false,HAS_P4_FIELD=false;
+let HAS_BOOKING_FIELD=false,HAS_NICK_FIELD=false,HAS_START_FIELD=false,HAS_P4_FIELD=false,HAS_RATE_FIELD=false;
 let FIELD_TYPES={};
 const CONTACT_FIELDS=['生日','家長LINE'];
 function gpText(page,name){
@@ -973,6 +976,7 @@ async function loadStudents(){
   HAS_NICK_FIELD=pages.some(p=>p.properties&&('暱稱' in p.properties));
   HAS_START_FIELD=pages.some(p=>p.properties&&('開始上課日' in p.properties));
   HAS_P4_FIELD=pages.some(p=>p.properties&&('藝文起始進度' in p.properties));
+  HAS_RATE_FIELD=pages.some(p=>p.properties&&('特別時薪' in p.properties));
   FIELD_TYPES={};CONTACT_FIELDS.forEach(n=>{const pg=pages.find(p=>p.properties&&p.properties[n]);if(pg)FIELD_TYPES[n]=pg.properties[n].type;});
   students=pages.map((p,i)=>({
     id:p.id,
@@ -1046,6 +1050,7 @@ async function updateStudent(id,data){
     ...(HAS_NICK_FIELD?{'暱稱':{rich_text:[{text:{content:String(data.nick||'')}}]}}:{}),
     ...(HAS_START_FIELD?{'開始上課日':{date:data.startDate?{start:data.startDate}:null}}:{}),
     ...(HAS_P4_FIELD?{'藝文起始進度':{number:data.p4start===''||data.p4start==null?null:Number(data.p4start)}}:{}),
+    ...(HAS_RATE_FIELD?{'特別時薪':{number:Number(data.rate)||null}}:{}),
     ...contactProps(data),
   }});
 }
@@ -1065,6 +1070,7 @@ async function createStudent(data){
   if(HAS_NICK_FIELD&&data.nick) extra['暱稱']={rich_text:[{text:{content:String(data.nick)}}]};
   if(HAS_START_FIELD&&data.startDate) extra['開始上課日']={date:{start:data.startDate}};
   if(HAS_P4_FIELD&&data.p4start!==''&&data.p4start!=null) extra['藝文起始進度']={number:Number(data.p4start)};
+  if(HAS_RATE_FIELD&&Number(data.rate)) extra['特別時薪']={number:Number(data.rate)};
   Object.assign(extra,contactProps(data));
   await notionAPI('PATCH',`/pages/${result.id}`,{properties:extra});
   return result;
@@ -1078,9 +1084,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.10.27-1';
+const APP_VERSION='2026.11.03-1';
 const CHANGELOG=[
-  {v:'2026.10.27-1',items:['修正：現在時間的紅線被泰順的班蓋住，紅線改回顯示在最上層']},
+  {v:'2026.11.03-1',items:['學生編輯表單新增「特別時薪」：個別學生的抽成後實拿時薪可以直接在 App 填，留空就用教室預設','薪資依特別時薪計算（例如林口 540／堂、楊梅 560／堂），90 分鐘的課依實際時數換算']},
   {v:'2026.10.25-2',items:['課表上泰順的班一律顯示在最上層，老師請假的斜線不會再蓋住它','操作教學更新：課表標示說明、捷徑測試按鈕、每晚自動檢查提醒']},
   {v:'2026.10.25-1',items:['修正：指定時段的老師請假被當成一堂課顯示在課表上，讓那天的課變窄、錯位；現在跟整天請假一樣只顯示斜線']},
   {v:'2026.10.23-2',items:['老師請假可以選「指定時段」：從某天幾點到某天幾點，只有這段時間內的課會停課，例如上完早上的課再請假','課表上指定時段的請假只會在那段時間畫斜線；請假期間外的時段照常可以排課','請假事由多了快速選項：颱風假、出差、演出、生病']},
@@ -1388,7 +1394,7 @@ function nowLineHtml(){
   const di=schedMode==='day'?0:(n.getUTCDay()+6)%7;
   const COL=`((100% - 36px) / ${schedMode==='day'?1:7})`;
   const top=(min-START_H*60)/60*ROW_H;
-  return`<div style="position:absolute;top:${top}px;left:calc(36px + ${di} * ${COL});width:calc(${COL});height:0;border-top:2px solid #e5484d;z-index:25;pointer-events:none;">
+  return`<div style="position:absolute;top:${top}px;left:calc(36px + ${di} * ${COL});width:calc(${COL});height:0;border-top:2px solid #e5484d;z-index:20;pointer-events:none;">
     <div style="position:absolute;left:-5px;top:-6px;width:10px;height:10px;border-radius:50%;background:#e5484d;"></div></div>`;
 }
 let scheduleScrollPending=false;
@@ -5379,6 +5385,7 @@ function openAddStudent(){
   document.getElementById('stu-nick').value='';
   document.getElementById('stu-start').value='';
   document.getElementById('stu-p4').value='';
+  document.getElementById('stu-rate').value='';
   ['stu-bd','stu-parent','stu-pphone','stu-pline'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('stu-note').value='';
   document.getElementById('sheet-student').classList.add('show');
@@ -5405,6 +5412,7 @@ function editStudent(id){
   document.getElementById('stu-nick').value=s.nick||'';
   document.getElementById('stu-start').value=s.startDate||'';
   document.getElementById('stu-p4').value=s.p4start||'';
+  document.getElementById('stu-rate').value=s.rate||'';
   document.getElementById('stu-bd').value=s.birthday||'';document.getElementById('stu-parent').value=s.parent||'';document.getElementById('stu-pphone').value=s.parentPhone||'';document.getElementById('stu-pline').value=s.parentLine||'';
   document.getElementById('stu-note').value=s.note||'';
   document.getElementById('sheet-student').classList.add('show');
@@ -5428,6 +5436,7 @@ async function saveStudent(){
       nick:document.getElementById('stu-nick').value.trim(),
       startDate:document.getElementById('stu-start').value,
       p4start:document.getElementById('stu-p4').value,
+      rate:document.getElementById('stu-rate').value,
       birthday:document.getElementById('stu-bd').value,
       parent:document.getElementById('stu-parent').value.trim(),
       parentPhone:document.getElementById('stu-pphone').value.trim(),
@@ -5441,6 +5450,7 @@ async function saveStudent(){
     if(!HAS_BOOKING_FIELD&&data.booking==='約課制') showToast('⚠️ Notion 尚未建立「排課方式」欄位，約課制未儲存');
     if(!HAS_NICK_FIELD&&data.nick) showToast('⚠️ Notion 尚未建立「暱稱」欄位，暱稱未儲存');
     if(!HAS_START_FIELD&&data.startDate) showToast('⚠️ Notion 尚未建立「開始上課日」欄位');
+    if(!HAS_RATE_FIELD&&data.rate) showToast('⚠️ Notion 學生資料庫尚未建立「特別時薪」（數字）欄位，特別時薪未儲存');
     const miss=CONTACT_FIELDS.filter(n=>!FIELD_TYPES[n]&&({'生日':data.birthday,'家長':data.parent,'家長電話':data.parentPhone,'家長LINE':data.parentLine})[n]);
     if(miss.length) showToast(`⚠️ Notion 尚未建立「${miss.join('、')}」欄位`);
     if(gcalValid()){
