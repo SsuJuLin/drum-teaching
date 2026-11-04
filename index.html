@@ -1084,8 +1084,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.11.04-1';
+const APP_VERSION='2026.11.04-2';
 const CHANGELOG=[
+  {v:'2026.11.04-2',items:['泰順薪資自動試算預扣：給付 20,010 元以上扣 10% 所得稅，20,000 元以上扣 2.11% 二代健保，顯示預估實領','泰順卡片的「應領」「還沒收」改用扣完之後的金額，收款就照實際入帳的金額記']},
   {v:'2026.11.04-1',items:['泰順薪資：薪資頁泰順卡片可以填時數（含通勤、出差）和時薪（預設 300），自動算出應領，金額也能手動修改；打卡含通勤的時數可以一鍵帶入','收款仍用「＋ 記錄收款」，泰順的應領／已收／還差會一起顯示']},
   {v:'2026.11.03-1',items:['學生編輯表單新增「特別時薪」：個別學生的抽成後實拿時薪可以直接在 App 填，留空就用教室預設','薪資依特別時薪計算（例如林口 540／堂、楊梅 560／堂），90 分鐘的課依實際時數換算']},
   {v:'2026.10.25-2',items:['課表上泰順的班一律顯示在最上層，老師請假的斜線不會再蓋住它','操作教學更新：課表標示說明、捷徑測試按鈕、每晚自動檢查提醒']},
@@ -3086,12 +3087,13 @@ async function renderSalary(silent){
     const order=[...rulePlaces(),'其他'];
     const list=Object.values(places).sort((a,b)=>order.indexOf(a.place)-order.indexOf(b.place));
     const total=list.reduce((a,x)=>a+x.pay,0);
+    const whAll=tsRow?tsWithhold(tsRow.amount||0):null;const withheld=whAll?whAll.tax+whAll.nhi:0;
     const paidTotal=paidRows.reduce((a,r)=>a+(r.amount||0),0)+list.reduce((a,x)=>a+x.extra.reduce((b,r)=>b+(r.amount||0),0),0);
     const money=n=>'$'+Math.round(n).toLocaleString();
     let html=`<div class="rec-card" style="padding:14px;margin-bottom:14px;">
       <div style="font-size:12px;color:var(--text3);">應領合計${sOff===0?'（只算已上完的課）':''}</div>
       <div style="font-size:26px;font-weight:900;color:var(--accent);margin:2px 0;">${money(total)}</div>
-      <div style="font-size:12px;color:var(--text3);">已收 ${money(paidTotal)}${total-paidTotal>0?`・還沒收 ${money(total-paidTotal)}`:''}</div>
+      <div style="font-size:12px;color:var(--text3);">已收 ${money(paidTotal)}${total-withheld-paidTotal>0?`・還沒收 ${money(total-withheld-paidTotal)}`:''}${withheld?`・預扣 ${money(withheld)}`:''}</div>
       ${salaryErr?`<div style="font-size:11px;color:var(--red);margin-top:8px;">讀不到 Notion「薪資紀錄」資料庫（${esc(salaryErr)}），請確認資料庫已「連接」爵士鼓教學系統</div>`:''}
       ${DB_SALARY&&!salaryErr?`<button class="add-rec-btn" style="margin-top:10px;" onclick="openIncome()">＋ 獎金／錄音案子／其他</button>`:`<div style="font-size:11px;color:#c8a84a;margin-top:8px;">尚未連接 Notion「薪資紀錄」資料庫，入帳與額外收入暫時無法記錄</div>`}
     </div>`;
@@ -3103,13 +3105,16 @@ async function renderSalary(silent){
       const prs=paidRows.filter(r=>r.place===x.place).sort((a,b)=>(a.date||'')<(b.date||'')?-1:1);
       const paidR=prs[0]||(x.extra.length?x.extra[0]:null);
       const due=rule.payDay?`預計 ${ny}/${nm}/${rule.payDay} 發薪`:rule.per4?'每位學生滿四堂發':'手動';
-      const diff=paidR?paid-x.pay:0;
+      const wh=x.place===FORM_PLACE&&tsRow?tsWithhold(tsRow.amount||0):null;
+      const dueX=x.pay-(wh?wh.tax+wh.nhi:0);
+      const diff=paidR?paid-dueX:0;
       html+=`<div class="rec-card" style="padding:12px;margin-bottom:10px;">
         <div style="display:flex;align-items:baseline;gap:8px;">
           <div style="flex:1;font-size:15px;font-weight:800;color:var(--text);">${x.place.replace(' Yamaha','')}</div>
           <div style="font-size:16px;font-weight:800;color:var(--text);">${money(x.pay)}</div></div>
         ${x.hist?`<div style="font-size:11px;color:var(--text3);margin-top:2px;">歷史紀錄（依入帳金額）</div>`:''}
         <div style="font-size:11px;color:var(--text3);margin-top:2px;">${x.hist?'':x.lessons||x.subs?`上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${x.hours.toFixed(1)} 小時${rule.rate?`・時薪 ${rule.rate}`:''}・`:''}${due}</div>
+        ${wh&&(wh.tax||wh.nhi)?`<div style="font-size:11px;color:var(--text3);margin-top:2px;">預扣 稅 ${money(wh.tax)}${wh.nhi?`＋健保 ${money(wh.nhi)}`:''}・預估實領 ${money(wh.net)}（應領是扣完之後的金額）</div>`:''}
         ${x.place===FORM_PLACE&&tsChecks.length?taishunReconHtml(tsChecks):''}
         ${x.place===FORM_PLACE&&!silent&&DB_SALARY&&!salaryErr?tsPayHtml(mk,tsRow,tsChecks):''}
         ${x.per4.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.per4.map(p=>{
@@ -3122,8 +3127,8 @@ async function renderSalary(silent){
         ${x.extra.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.extra.map(r=>`＋ ${esc(r.type)}${r.name?'・'+esc(r.name):''} ${money(r.amount||0)}`).join('<br>')}</div>`:''}
         <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
           <div style="display:flex;align-items:center;gap:8px;">
-            <div style="flex:1;font-size:12px;color:${paidR?(diff>=0?'var(--accent)':'#c8a84a'):'var(--text3)'};">${paidR?`已收 ${money(paid)}／應領 ${money(x.pay)}${diff<0?`・還差 ${money(-diff)}`:diff>0?`・多 ${money(diff)}`:''}`:'未收款'}</div>
-            ${DB_SALARY&&!x.hist&&!(rule.per4)?`<button class="add-rec-btn" style="padding:5px 10px;font-size:12px;" onclick="openPaid('${x.place}',${Math.max(0,x.pay-paid)},'${mk}')">＋ 記錄收款</button>`:''}
+            <div style="flex:1;font-size:12px;color:${paidR?(diff>=0?'var(--accent)':'#c8a84a'):'var(--text3)'};">${paidR?`已收 ${money(paid)}／應領 ${money(dueX)}${diff<0?`・還差 ${money(-diff)}`:diff>0?`・多 ${money(diff)}`:''}`:'未收款'}</div>
+            ${DB_SALARY&&!x.hist&&!(rule.per4)?`<button class="add-rec-btn" style="padding:5px 10px;font-size:12px;" onclick="openPaid('${x.place}',${Math.max(0,dueX-paid)},'${mk}')">＋ 記錄收款</button>`:''}
           </div>
           ${prs.map(r=>`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text3);padding:3px 0;"><div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">💵 ${r.date?mdShort(r.date):'未填日期'} 收 ${r.amount?money(r.amount):'未填金額'}${r.note?'・'+esc(r.note):''}</div>${DB_SALARY?`<button style="${smallBtn('var(--text3)')}padding:2px 8px;" onclick="openPaid('${x.place}',${x.pay},'${mk}','${r.id}')">改</button>`:''}</div>`).join('')}
         </div></div>`;
@@ -3135,6 +3140,20 @@ async function renderSalary(silent){
 // ── 泰順薪資：自己填時數（含通勤、出差）× 時薪，自動算，金額可以手動改 ──
 const TS_RATE=300,TS_TYPE='泰順時數';
 function tsParse(r){const m=(r&&r.note||'').match(/時數\s*([\d.]+).*?時薪\s*([\d.]+)/);return m?{h:parseFloat(m[1]),r:parseFloat(m[2])}:null;}
+// 9A 執行業務所得預扣：稅 10%（應扣稅額超過 2,000 才扣，即給付 ≥20,010）、二代健保 2.11%（單次給付 ≥20,000）
+function tsWithhold(a){
+  a=Number(a)||0;
+  const tax=a>=20010?Math.floor(a*0.10):0;
+  const nhi=a>=20000?Math.round(a*0.0211):0;
+  return{tax,nhi,net:a-tax-nhi};
+}
+function tsNetHtml(a){
+  const w=tsWithhold(a);
+  if(!(Number(a)>0)) return '';
+  if(!w.tax&&!w.nhi) return `未達預扣門檻，實領 $${w.net.toLocaleString()}`;
+  return `預扣 稅 $${w.tax.toLocaleString()}${w.nhi?`＋健保 $${w.nhi.toLocaleString()}`:''} → 預估實領 <b style="color:var(--text);">$${w.net.toLocaleString()}</b>`;
+}
+function tsNet(){const el=document.getElementById('ts-net');if(el)el.innerHTML=tsNetHtml(document.getElementById('ts-amt').value);}
 function tsPayHtml(mk,row,checks){
   const last=salaryRows.filter(r=>r.type===TS_TYPE).sort((a,b)=>(a.date||'')<(b.date||'')?1:-1)[0];
   const cur=tsParse(row),prev=tsParse(last);
@@ -3150,7 +3169,8 @@ function tsPayHtml(mk,row,checks){
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--text2);">
       <input id="ts-h" type="number" inputmode="decimal" step="0.5" min="0" value="${hrs}" placeholder="時數" oninput="tsCalc()" style="${inp}width:76px;">小時 ×
       <input id="ts-r" type="number" inputmode="numeric" min="0" value="${rate}" oninput="tsCalc()" style="${inp}width:64px;">元 = $
-      <input id="ts-amt" type="number" inputmode="numeric" min="0" value="${amt}" placeholder="金額" style="${inp}width:92px;font-weight:800;"></div>
+      <input id="ts-amt" type="number" inputmode="numeric" min="0" value="${amt}" placeholder="金額" oninput="tsNet()" style="${inp}width:92px;font-weight:800;"></div>
+    <div id="ts-net" style="font-size:12px;color:var(--text2);margin-top:6px;">${tsNetHtml(amt)}</div>
     ${checks.length?`<div style="font-size:11px;color:var(--text3);margin-top:6px;">打卡含通勤共 ${withC} 小時（出差沒打卡的天數要自己加）<button style="margin-left:6px;background:none;border:1px solid var(--border2);color:var(--text2);border-radius:10px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" onclick="tsFill(${withC})">帶入</button></div>`:''}
     <div style="font-size:11px;color:var(--text3);margin-top:4px;">改時數或時薪會重算金額；也可以直接改金額（例如加減項）。</div>
     <div style="display:flex;gap:8px;margin-top:8px;">
@@ -3160,6 +3180,7 @@ function tsPayHtml(mk,row,checks){
 function tsCalc(){
   const h=parseFloat(document.getElementById('ts-h').value),r=parseFloat(document.getElementById('ts-r').value);
   if(h>=0&&r>=0) document.getElementById('ts-amt').value=Math.round(h*r);
+  tsNet();
 }
 function tsFill(h){document.getElementById('ts-h').value=h;tsCalc();}
 function tsRowOf(mk){return salaryRows.find(r=>r.type===TS_TYPE&&salaryMonthOf(r)===mk);}
@@ -3586,7 +3607,7 @@ const HELP=[
  ]},
  {t:'💰 薪資',items:[
   ['泰順對帳','薪資頁泰順那張卡片，點「🕘 打卡對帳」展開每天的打卡時數和含通勤的時數，月底跟公司薪資單對照。'],
-  ['泰順薪資','泰順那張卡片可以填「時數（含通勤、出差）× 時薪（預設 300）」，會自動算出金額，金額也能直接改，按儲存就會算進應領。收到錢再按「記錄收款」。'],
+  ['泰順薪資','泰順那張卡片可以填「時數（含通勤、出差）× 時薪（預設 300）」，會自動算出金額，金額也能直接改，按儲存就會算進應領。收到錢再按「記錄收款」。金額超過 20,010 會自動試算預扣的 10% 所得稅和 2.11% 二代健保，卡片的「應領」是扣完之後的實領。'],
   ['應領怎麼算','時薪 × 實際上課時數；學生有特別時薪就用特別價；請假、老師停課不算；代課和體驗課照教室時薪。當月只算已上完的課。'],
   ['藝文滿四堂','每位學生各自滿四堂發一次（第四堂當天收到）。這筆算在四堂裡大部分所在的月份，平手算第四堂的月份。同步日曆前已上的堂數填在學生的「藝文起始進度」。'],
   ['記錄收款','每收到一筆錢，就在那間教室按「＋ 記錄收款」，填金額和收到的日期。一個月可以記很多次，卡片會顯示「已收／應領」和每一筆。'],
