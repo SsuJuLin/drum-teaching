@@ -1084,8 +1084,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.11.03-1';
+const APP_VERSION='2026.11.04-1';
 const CHANGELOG=[
+  {v:'2026.11.04-1',items:['泰順薪資：薪資頁泰順卡片可以填時數（含通勤、出差）和時薪（預設 300），自動算出應領，金額也能手動修改；打卡含通勤的時數可以一鍵帶入','收款仍用「＋ 記錄收款」，泰順的應領／已收／還差會一起顯示']},
   {v:'2026.11.03-1',items:['學生編輯表單新增「特別時薪」：個別學生的抽成後實拿時薪可以直接在 App 填，留空就用教室預設','薪資依特別時薪計算（例如林口 540／堂、楊梅 560／堂），90 分鐘的課依實際時數換算']},
   {v:'2026.10.25-2',items:['課表上泰順的班一律顯示在最上層，老師請假的斜線不會再蓋住它','操作教學更新：課表標示說明、捷徑測試按鈕、每晚自動檢查提醒']},
   {v:'2026.10.25-1',items:['修正：指定時段的老師請假被當成一堂課顯示在課表上，讓那天的課變窄、錯位；現在跟整天請假一樣只顯示斜線']},
@@ -2940,7 +2941,7 @@ async function renderSalaryYears(){
     const cols=['楊梅宏音 Yamaha','內壢奧莉琪','林口星玥','藝文鹿納','泰順錄音室','其他'];
     const data={};
     rows.forEach(r=>{
-      const mk=r.type?salaryMonthOf(r):null;
+      const mk=r.type&&r.type!=='泰順時數'?salaryMonthOf(r):null;
       if(!mk) return;
       const pl=cols.includes(r.place)?r.place:'其他';
       (data[mk]=data[mk]||{})[pl]=(data[mk][pl]||0)+(r.amount||0);
@@ -3057,7 +3058,7 @@ async function renderSalary(silent){
       if(x.per4.length||x.pay) places[per4Place]=x;
     }
     // Notion：獎金、錄音案子、其他收入（依月份歸屬；這些都是已經收到的錢）
-    rows.filter(r=>r.type&&r.type!=='入帳'&&salaryMonthOf(r)===mk).forEach(r=>{const x=P(r.place||'其他');x.pay+=r.amount||0;x.extra.push(r);});
+    rows.filter(r=>r.type&&r.type!=='入帳'&&r.type!=='泰順時數'&&salaryMonthOf(r)===mk).forEach(r=>{const x=P(r.place||'其他');x.pay+=r.amount||0;x.extra.push(r);});
     // 收款：名稱開頭的月份，沒有的話用收到日期往前推一個月
     const paidRows=rows.filter(r=>r.type==='入帳'&&salaryMonthOf(r)===mk);
     if(per4Place&&places[per4Place]){
@@ -3071,6 +3072,10 @@ async function renderSalary(silent){
         }
       }
     }
+    // 泰順：自己填的時數×時薪（可手動改金額）當作應領
+    const tsRow=rows.find(r=>r.type==='泰順時數'&&salaryMonthOf(r)===mk);
+    if(tsRow){const tx=P(FORM_PLACE);tx.pay+=tsRow.amount||0;tx.hist=false;}
+    else if(!silent&&sOff>=-2) P(FORM_PLACE);
     // 這個地點這個月沒有任何課程資料（舊月份）→ 用收款金額當作應領
     paidRows.filter(r=>r.place).forEach(r=>{
       const x=P(r.place);
@@ -3106,6 +3111,7 @@ async function renderSalary(silent){
         ${x.hist?`<div style="font-size:11px;color:var(--text3);margin-top:2px;">歷史紀錄（依入帳金額）</div>`:''}
         <div style="font-size:11px;color:var(--text3);margin-top:2px;">${x.hist?'':x.lessons||x.subs?`上課 ${x.lessons} 堂${x.subs?`＋代課 ${x.subs}`:''}・${x.hours.toFixed(1)} 小時${rule.rate?`・時薪 ${rule.rate}`:''}・`:''}${due}</div>
         ${x.place===FORM_PLACE&&tsChecks.length?taishunReconHtml(tsChecks):''}
+        ${x.place===FORM_PLACE&&!silent&&DB_SALARY&&!salaryErr?tsPayHtml(mk,tsRow,tsChecks):''}
         ${x.per4.length?`<div style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.7;">${x.per4.map(p=>{
           if(p.progress) return`<div style="color:var(--text3);">${esc(p.name)} 進度 ${p.progress}/4</div>`;
           const tag=`${p.name}（${mdShort(p.date)}）`;
@@ -3125,6 +3131,55 @@ async function renderSalary(silent){
     wrap.innerHTML=head+html;
     return total;
   }catch(e){wrap.innerHTML=head+`<div class="rec-empty" style="color:var(--red);">${e.message}</div>`;}
+}
+// ── 泰順薪資：自己填時數（含通勤、出差）× 時薪，自動算，金額可以手動改 ──
+const TS_RATE=300,TS_TYPE='泰順時數';
+function tsParse(r){const m=(r&&r.note||'').match(/時數\s*([\d.]+).*?時薪\s*([\d.]+)/);return m?{h:parseFloat(m[1]),r:parseFloat(m[2])}:null;}
+function tsPayHtml(mk,row,checks){
+  const last=salaryRows.filter(r=>r.type===TS_TYPE).sort((a,b)=>(a.date||'')<(b.date||'')?1:-1)[0];
+  const cur=tsParse(row),prev=tsParse(last);
+  const rate=cur?cur.r:(prev?prev.r:TS_RATE);
+  const hrs=cur?cur.h:'';
+  const amt=row?(row.amount||0):'';
+  const days=new Set(checks.map(e=>evParts(e.start.dateTime).date)).size;
+  const tot=checks.reduce((a,e)=>a+(new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000,0);
+  const withC=Math.round((tot+days*FORM_COMMUTE)*10)/10;
+  const inp='background:var(--card);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:6px 8px;font-size:16px;font-family:inherit;min-width:0;';
+  return`<div style="margin-top:8px;padding:10px;border-radius:10px;background:var(--card2);">
+    <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px;">薪資計算（時數含通勤、出差）</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--text2);">
+      <input id="ts-h" type="number" inputmode="decimal" step="0.5" min="0" value="${hrs}" placeholder="時數" oninput="tsCalc()" style="${inp}width:76px;">小時 ×
+      <input id="ts-r" type="number" inputmode="numeric" min="0" value="${rate}" oninput="tsCalc()" style="${inp}width:64px;">元 = $
+      <input id="ts-amt" type="number" inputmode="numeric" min="0" value="${amt}" placeholder="金額" style="${inp}width:92px;font-weight:800;"></div>
+    ${checks.length?`<div style="font-size:11px;color:var(--text3);margin-top:6px;">打卡含通勤共 ${withC} 小時（出差沒打卡的天數要自己加）<button style="margin-left:6px;background:none;border:1px solid var(--border2);color:var(--text2);border-radius:10px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" onclick="tsFill(${withC})">帶入</button></div>`:''}
+    <div style="font-size:11px;color:var(--text3);margin-top:4px;">改時數或時薪會重算金額；也可以直接改金額（例如加減項）。</div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="add-rec-btn" style="padding:6px 14px;font-size:12px;" onclick="saveTsPay('${mk}')">儲存</button>
+      ${row?`<button style="background:none;border:1px solid var(--border2);color:var(--text3);border-radius:14px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit;" onclick="clearTsPay('${mk}')">清除</button>`:''}</div></div>`;
+}
+function tsCalc(){
+  const h=parseFloat(document.getElementById('ts-h').value),r=parseFloat(document.getElementById('ts-r').value);
+  if(h>=0&&r>=0) document.getElementById('ts-amt').value=Math.round(h*r);
+}
+function tsFill(h){document.getElementById('ts-h').value=h;tsCalc();}
+function tsRowOf(mk){return salaryRows.find(r=>r.type===TS_TYPE&&salaryMonthOf(r)===mk);}
+async function saveTsPay(mk){
+  const h=document.getElementById('ts-h').value,r=document.getElementById('ts-r').value,a=document.getElementById('ts-amt').value;
+  if(a===''||isNaN(Number(a))){showToast('請填時數或金額');return;}
+  const o={name:`${mk} 泰順薪資`,type:TS_TYPE,amount:Number(a),date:mk.replace('/','-')+'-01',place:FORM_PLACE,note:`時數 ${h||0}・時薪 ${r||0}`};
+  try{
+    const ex=tsRowOf(mk);
+    if(ex) await notionAPI('PATCH',`/pages/${ex.id}`,{properties:salaryProps(o)});
+    else await notionAPI('POST','/pages',{parent:{database_id:DB_SALARY},properties:salaryProps(o)});
+    showToast('✅ 泰順薪資已儲存');renderSalary();
+  }catch(e){showToast('❌ '+e.message);}
+}
+function clearTsPay(mk){
+  const ex=tsRowOf(mk);if(!ex)return;
+  showConfirm('清除泰順薪資','確定清除這個月填的時數和金額？（已記錄的收款不受影響）',async()=>{
+    try{await notionAPI('PATCH',`/pages/${ex.id}`,{archived:true});showToast('✅ 已清除');renderSalary();}
+    catch(e){showToast('❌ '+e.message);}
+  });
 }
 // ── 入帳 ──
 let paidCtx=null;
@@ -3531,6 +3586,7 @@ const HELP=[
  ]},
  {t:'💰 薪資',items:[
   ['泰順對帳','薪資頁泰順那張卡片，點「🕘 打卡對帳」展開每天的打卡時數和含通勤的時數，月底跟公司薪資單對照。'],
+  ['泰順薪資','泰順那張卡片可以填「時數（含通勤、出差）× 時薪（預設 300）」，會自動算出金額，金額也能直接改，按儲存就會算進應領。收到錢再按「記錄收款」。'],
   ['應領怎麼算','時薪 × 實際上課時數；學生有特別時薪就用特別價；請假、老師停課不算；代課和體驗課照教室時薪。當月只算已上完的課。'],
   ['藝文滿四堂','每位學生各自滿四堂發一次（第四堂當天收到）。這筆算在四堂裡大部分所在的月份，平手算第四堂的月份。同步日曆前已上的堂數填在學生的「藝文起始進度」。'],
   ['記錄收款','每收到一筆錢，就在那間教室按「＋ 記錄收款」，填金額和收到的日期。一個月可以記很多次，卡片會顯示「已收／應領」和每一筆。'],
