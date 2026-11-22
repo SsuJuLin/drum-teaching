@@ -1084,8 +1084,9 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.11.17-1';
+const APP_VERSION='2026.11.17-2';
 const CHANGELOG=[
+  {v:'2026.11.17-2',items:['待寫紀錄改成顯示過去 90 天內所有沒寫紀錄的課（這一週的課連已寫的也會列出來，灰色顯示）；首頁提醒也改成「還有 N 堂未紀錄」']},
   {v:'2026.11.17-1',items:['修正課表某一天課很多又有泰順班表時，那一天的課整排歪斜：前後接續的課現在對齊同一欄，只有真的同時間重疊才錯開','修正當天才請假，首頁「今日上課堂數」沒有跟著減','新增「泰順臨時時段」：排課選單可以自己加泰順的臨時時段（例如一小時線上會議），顯示在課表上、算泰順排班，點一下可刪除']},
   {v:'2026.11.04-4',items:['泰順的月加總改用「扣完稅的實領」，卡片另外顯示稅前金額和預扣明細（跟之前填扣稅後金額的習慣一致）','林口星玥每個月扣 15 元轉帳手續費（算進應領，卡片上會標示）']},
   {v:'2026.11.04-3',items:['待寫紀錄範圍從「昨天＋今天」改成「這一週」（週一到今天，週一時至少含昨天），首頁提醒也改成「這週還有 N 堂未紀錄」','泰順薪資卡片拿掉說明字和「帶入」鍵，時數對照看上方的「打卡對帳」']},
@@ -1698,13 +1699,14 @@ async function loadToday(){
   if(!gcalValid()){todayEvents=null;todayKey=null;return;}
   const td=twToday();if(todayKey===td&&todayEvents)return;
   try{
-    const d=await gcal('GET','/events',null,[['timeMin',twISO(todoStart(td),'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','500']]);
-    todayEvents=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&(e.extendedProperties?.private?.studentId||isSub(e)));
+    const dItems=await gcalAll([['timeMin',twISO(addDays(td,-TODO_DAYS),'00:00')],['timeMax',twISO(addDays(td,1),'00:00')],['singleEvents','true'],['orderBy','startTime'],['maxResults','500']]);
+    todayEvents=(dItems||[]).filter(e=>e.status!=='cancelled'&&e.start&&e.start.dateTime&&(e.extendedProperties?.private?.studentId||isSub(e)));
     todayShifts=(await fetchShifts(td,addDays(td,1)));
     todayKey=td;
   }catch(e){todayEvents=null;}
 }
-// 待寫紀錄的範圍：這一週（週一到今天），週一時至少含昨天
+// 待寫紀錄：往前找 90 天內所有沒寫紀錄的課；這一週（週一到今天）連已寫的也列出來
+const TODO_DAYS=90;
 function todoStart(td){const mon=mondayOf(0),yd=addDays(td,-1);return mon<yd?mon:yd;}
 // 首頁摘要卡（點進去看這一週的紀錄卡片）
 function todoData(){
@@ -1713,15 +1715,15 @@ function todoData(){
   const dateOf=e=>evParts(e.start.dateTime).date;
   const recOf=e=>isSub(e)?(e.extendedProperties.private.content?{sub:true}:null):records.find(r=>r.studentId===e.extendedProperties.private.studentId&&r.date===dateOf(e));
   const items=lessons.map(e=>({e,date:dateOf(e),p:evParts(e.start.dateTime),ended:new Date(e.end.dateTime).getTime()<=now,rec:recOf(e)}));
-  return{td,yd,start:todoStart(td),items,miss:items.filter(x=>x.ended&&!x.rec)};
+  return{td,yd,start:todoStart(td),from:addDays(td,-TODO_DAYS),items,miss:items.filter(x=>x.ended&&!x.rec)};
 }
 // 待寫紀錄頁：這一週的課，已紀錄的顯示灰色
 function renderTodo(){
   const wrap=document.getElementById('todo-wrap');
   if(!gcalValid()||!todayEvents){wrap.innerHTML=`<div class="rec-empty">請先連接 Google 日曆</div>`;return;}
-  const {td,yd,start,items,miss}=todoData();
+  const {td,yd,start,from,items,miss}=todoData();
   const sec=(label,ds)=>{
-    const list=items.filter(x=>x.date===ds).sort((a,b)=>a.p.min-b.p.min);
+    const list=items.filter(x=>x.date===ds&&(ds>=start||(x.ended&&!x.rec))).sort((a,b)=>a.p.min-b.p.min);
     if(!list.length) return'';
     const left=list.filter(x=>!x.rec).length;
     return`<div class="rec-section-head" style="margin-top:6px;"><div class="sec-line"><div class="section-title">${label}</div><div class="rec-count">・${fmtMD(ds)}・${list.length} 堂・未紀錄 ${left}</div></div></div>
@@ -1736,8 +1738,8 @@ function renderTodo(){
           <div class="s-right" style="font-size:12px;">${tag}</div>
         </div>`;}).join('')}`;
   };
-  let html='';for(let ds=start;ds<=td;ds=addDays(ds,1)) html+=sec(ds===td?'今天':ds===yd?'昨天':fmtMD(ds),ds);
-  wrap.innerHTML=`<div style="font-size:13px;color:var(--text2);margin-bottom:10px;">${miss.length?`還有 <b style="color:#c8a84a;">${miss.length}</b> 堂上完的課沒寫紀錄，點卡片就能填寫`:'上完的課都記錄好了 👍'}</div>`+(html||`<div class="rec-empty">這週都沒有課</div>`);
+  let html='';for(let ds=from;ds<=td;ds=addDays(ds,1)) html+=sec(ds===td?'今天':ds===yd?'昨天':fmtMD(ds),ds);
+  wrap.innerHTML=`<div style="font-size:13px;color:var(--text2);margin-bottom:10px;">${miss.length?`還有 <b style="color:#c8a84a;">${miss.length}</b> 堂上完的課沒寫紀錄，點卡片就能填寫`:`上完的課都記錄好了 👍（往前看 ${TODO_DAYS} 天）`}</div>`+(html||`<div class="rec-empty">最近都沒有課</div>`);
 }
 function recordLesson(sid,hhmm,ds){openAddRecord(sid);document.getElementById('rec-time').value=hhmm;if(ds)document.getElementById('rec-date').value=ds;}
 
@@ -3551,7 +3553,7 @@ function renderRules(){
 const HELP=[
  {t:'🏠 首頁',items:[
   ['今日課程','列出今天要上的課。點某一堂會展開上一堂的完整紀錄，按「＋ 新增紀錄（帶入上次內容）」就能接著寫。'],
-  ['提醒區','有課沒打卡、這週還沒寫紀錄、記得填泰順時數，有事才會出現，點了直接去處理。'],
+  ['提醒區','有課沒打卡、還沒寫的上課紀錄、記得填泰順時數，有事才會出現，點了直接去處理。'],
   ['打卡','一行顯示今天的打卡。沒打卡時按「＋ 📍 打卡」：人在已設定的教室附近會直接打卡，否則打開手動打卡。'],
   ['指令框','標題列左邊的 ⌨️，任何頁面都能打開，用打字完成請假、調課、補課等，詳見「指令框」這一節。'],
   ['重新整理','點底部的首頁圖示，會重新抓取 Notion 和日曆的最新資料。'],
@@ -4514,7 +4516,7 @@ function ydMissHtml(){
   const n=items.filter(x=>x.date<td&&x.ended&&!x.rec).length;
   if(!n) return '';
   return`<div style="background:var(--card);border:1px solid rgba(200,168,74,0.5);border-radius:12px;padding:10px 12px;margin:0 16px 10px;display:flex;align-items:center;cursor:pointer;" onclick="showPage('todo')">
-    <div style="flex:1;font-size:13px;color:#c8a84a;font-weight:700;">📝 這週還有 ${n} 堂未紀錄</div><div style="color:var(--text3);">›</div></div>`;
+    <div style="flex:1;font-size:13px;color:#c8a84a;font-weight:700;">📝 還有 ${n} 堂未紀錄</div><div style="color:var(--text3);">›</div></div>`;
 }
 // 打卡一行：永遠有一顆按鈕
 function checkinHtml(){
@@ -4643,7 +4645,7 @@ function renderSettings(){
     setRow('🕘','打卡紀錄',setStats.ck||'每月打卡與工時',"showPage('checkins')")+
     setRow('🏖','請假紀錄','我的請假・學生請假',"showPage('leaves')")+
     setRow('🔁','代課紀錄',setStats.sub!=null?`本月 ${setStats.sub} 堂`:'代課與代課紀錄',"showPage('subs')")+
-    setRow('📝','待寫紀錄','這週的上課紀錄',"showPage('todo')")+
+    setRow('📝','待寫紀錄','還沒寫的上課紀錄',"showPage('todo')")+
     setRow('🏋️','健身紀錄',gymRows?(()=>{const ym=twToday().slice(0,7);const l=gymRows.filter(r=>evParts(r.start).date.startsWith(ym));const h=l.filter(r=>r.end).reduce((a,r)=>a+(new Date(r.end)-new Date(r.start))/3600000,0);return `本月 ${l.length} 次・${h.toFixed(1)}h`;})():'去健身房的時間',"showPage('gym')")+
     setRow('📍','教室','四間教室的學生與上課日',"showPage('rooms')")+
     setRow('📋','版本紀錄',`目前 ${APP_VERSION}`,"showPage('changelog')"));
