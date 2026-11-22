@@ -487,11 +487,13 @@ input[type=date].form-input,input[type=time].form-input,input[type=month].form-i
       <div class="form-group" id="book-student-row" style="display:none;"><label class="form-label">學生</label><select class="form-select" id="book-student" onchange="pickBookStudent(this.value)"></select></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">日期</label><input class="form-input" type="date" id="book-date"></div>
-        <div class="form-group"><label class="form-label">時間</label><input class="form-input" type="time" id="book-time" step="900"></div>
+        <div class="form-group"><label class="form-label">時間</label><input class="form-input" type="time" id="book-time" step="900" onchange="tsEndSync()"></div>
       </div>
-      <div class="form-group"><label class="form-label">上課時長</label>
+      <div class="form-group" id="book-dur-row"><label class="form-label">上課時長</label>
         <select class="form-select" id="book-duration"><option value="30">30 分鐘</option><option value="60">60 分鐘</option><option value="90">90 分鐘</option><option value="120">120 分鐘</option></select>
       </div>
+      <div class="form-group" id="book-end-row" style="display:none;"><label class="form-label">結束時間</label><input class="form-input" type="time" id="book-end" step="900"></div>
+      <div class="form-group" id="book-ts-row" style="display:none;"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);"><input type="checkbox" id="book-ts-boss" checked style="width:18px;height:18px;"> 寫進老闆的行事曆（老闆和同事看得到）</label></div>
     </div>
     <div class="sheet-footer">
       <button class="btn-cancel" onclick="closeSheet('sheet-booking')">取消</button>
@@ -1084,8 +1086,10 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.11.17-2';
+const APP_VERSION='2026.11.22-2';
 const CHANGELOG=[
+  {v:'2026.11.22-2',items:['排泰順班改成選「開始時間」和「結束時間」，不再只有 30／60／90／120 分鐘']},
+  {v:'2026.11.22-1',items:['泰順班表可以直接在 App 排：排課選「泰順臨時時段」，預設寫進老闆的行事曆（標題「林似儒」），也可取消勾選只存在自己的日曆','點課表上的泰順格子可以刪除（老闆行事曆上的班會真的被刪掉，刪之前會確認）']},
   {v:'2026.11.17-2',items:['待寫紀錄改成顯示過去 90 天內所有沒寫紀錄的課（這一週的課連已寫的也會列出來，灰色顯示）；首頁提醒也改成「還有 N 堂未紀錄」']},
   {v:'2026.11.17-1',items:['修正課表某一天課很多又有泰順班表時，那一天的課整排歪斜：前後接續的課現在對齊同一欄，只有真的同時間重疊才錯開','修正當天才請假，首頁「今日上課堂數」沒有跟著減','新增「泰順臨時時段」：排課選單可以自己加泰順的臨時時段（例如一小時線上會議），顯示在課表上、算泰順排班，點一下可刪除']},
   {v:'2026.11.04-4',items:['泰順的月加總改用「扣完稅的實領」，卡片另外顯示稅前金額和預扣明細（跟之前填扣稅後金額的習慣一致）','林口星玥每個月扣 15 元轉帳手續費（算進應領，卡片上會標示）']},
@@ -1359,7 +1363,7 @@ async function fetchWeek(mon){
   })();
   return weekFetching[mon];
 }
-// ── 泰順H14 排班：讀老闆的行事曆，只認標題是「林似儒」或「阿森」的行程（只讀不寫）──
+// ── 泰順H14 排班：讀老闆的行事曆，只認標題是「林似儒」或「阿森」的行程（平常只讀；從 App 排／刪班才會寫入）──
 const NOTIFY_CAL='435ee4b795213759057647a3e1a1df0566ec74fe42bcddd7bd281942c541a241@group.calendar.google.com'; // 通知專用日曆
 const nf=(m,p,b,q)=>gcal(m,p,b,q,NOTIFY_CAL);
 const SHIFT_CAL='c_2bb04f82a408245d0d6578f485e7dc1123b0ce7e39cdfc7e03a923b45b7febb5@group.calendar.google.com';
@@ -1374,7 +1378,7 @@ async function fetchShifts(fromDs,toDs){
   let out=[];
   try{
     const d=await gcal('GET','/events',null,q,SHIFT_CAL);
-    out=(d&&d.items||[]).filter(isMyShift).map(e=>({id:e.id,start:e.start.dateTime,end:e.end.dateTime}));
+    out=(d&&d.items||[]).filter(isMyShift).map(e=>({id:e.id,start:e.start.dateTime,end:e.end.dateTime,boss:true}));
   }catch(e){console.warn('shifts',e.message);}
   // 自己臨時加的泰順時段（存在課程日曆，標記 tsExtra）
   try{
@@ -1383,9 +1387,9 @@ async function fetchShifts(fromDs,toDs){
   }catch(e){console.warn('tsExtra',e.message);}
   return out;
 }
-async function delExtraShift(id){
-  showConfirm('刪除泰順臨時時段','這個臨時加的泰順時段會刪除。',async()=>{
-    try{await gcal('DELETE',`/events/${id}`);weekKey=null;weekCache={};todayKey=null;showToast('✅ 已刪除');
+async function delExtraShift(id,boss){
+  showConfirm(boss?'刪除老闆行事曆上的班':'刪除泰順臨時時段',boss?'這個班會直接從老闆的行事曆刪除，老闆和同事都會看到。':'這個臨時加的泰順時段會刪除。',async()=>{
+    try{await gcal('DELETE',`/events/${id}`,null,null,boss?SHIFT_CAL:undefined);weekKey=null;weekCache={};todayKey=null;showToast('✅ 已刪除');
       if(curPage==='schedule')renderSchedule();if(curPage==='home'){await Promise.all([loadWeek(),loadToday()]);renderHome();}}
     catch(e){showToast('❌ '+e.message);}
   });
@@ -1825,15 +1829,19 @@ function openBooking(sid){
 async function saveBooking(){
   if(bookingStudentId==='__ts'){
     const ds=document.getElementById('book-date').value,tm=document.getElementById('book-time').value;
-    const dur=parseInt(document.getElementById('book-duration').value)||60;
-    if(!ds||!tm){showToast('請選擇日期與時間');return;}
+    const endTm=document.getElementById('book-end').value;
+    if(!ds||!tm||!endTm){showToast('請選擇日期、開始和結束時間');return;}
+    const dur=hmToMin(endTm)-hmToMin(tm);
+    if(dur<=0){showToast('結束時間要晚於開始時間');return;}
     const btn=document.getElementById('save-book-btn');btn.disabled=true;btn.textContent='建立中…';
     try{
       const start=twISO(ds,tm);
-      await gcal('POST','/events',{summary:'🎙 泰順臨時時段',description:'泰順臨時時段（爵士鼓教學系統）',location:SHIFT_PLACE,
-        start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'},
-        transparency:'transparent',extendedProperties:{private:{kind:'tsExtra'}}});
-      weekKey=null;weekCache={};todayKey=null;closeSheet('sheet-booking');showToast(`✅ 已加泰順時段 ${fmtMD(ds)} ${tm}`);
+      const toBoss=document.getElementById('book-ts-boss').checked;
+      const times={start:{dateTime:start,timeZone:'Asia/Taipei'},end:{dateTime:plusMin(start,dur),timeZone:'Asia/Taipei'}};
+      if(toBoss) await gcal('POST','/events',{summary:SHIFT_NAMES[0],...times},null,SHIFT_CAL);
+      else await gcal('POST','/events',{summary:'🎙 泰順臨時時段',description:'泰順臨時時段（爵士鼓教學系統）',location:SHIFT_PLACE,
+        ...times,transparency:'transparent',extendedProperties:{private:{kind:'tsExtra'}}});
+      weekKey=null;weekCache={};todayKey=null;closeSheet('sheet-booking');showToast(`✅ 已加泰順班 ${fmtMD(ds)} ${tm}${toBoss?'（老闆行事曆）':''}`);
       if(curPage==='schedule')renderSchedule();
       if(curPage==='home'){await Promise.all([loadWeek(),loadToday()]);renderHome();}
     }catch(e){showToast('❌ '+e.message);}
@@ -3626,7 +3634,7 @@ const HELP=[
   ['AI 解讀','規則看不懂的口語句子，會自動請 AI 解讀，確認卡片會標 🤖。設定方式在 設定 → 連線與同步 →「AI 指令」。'],
  ]},
  {t:'🎧 泰順H14 排班',items:[
-  ['自動讀取','系統會讀老闆的排班行事曆，只認標題是「林似儒」或「阿森」的行程，其他人的班和「阿森真的不行」這類行程都會略過。只讀不寫，不會改到老闆的行事曆。'],
+  ['自動讀取','系統會讀老闆的排班行事曆，只認標題是「林似儒」或「阿森」的行程，其他人的班和「阿森真的不行」這類行程都會略過。平常只讀；只有你自己在 App 排或刪泰順班的時候，才會改到老闆的行事曆。'],
   ['顯示','課表上用青綠色顯示「泰順H14」，首頁今日課程和匯出課表也會列出。'],
   ['打卡','有班的日子，人在泰順附近打開網站就會自動打卡，下班時間就是表定時間，不用按下班；表定下班後 30 分鐘提醒填時數。'],
   ['排班改了','老闆改或刪排班，下次打開網站或按首頁重新整理就會更新。'],
@@ -3642,7 +3650,7 @@ const HELP=[
  ]},
  {t:'💰 薪資',items:[
   ['泰順對帳','薪資頁泰順那張卡片，點「🕘 打卡對帳」展開每天的打卡時數和含通勤的時數，月底跟公司薪資單對照。'],
-  ['泰順臨時時段','課表右下角「＋ 排課」→ 選「🎙 泰順臨時時段」，填日期、時間、時長（例如一小時的線上會議）。會顯示在課表上，也算泰順的排班；點課表上那一格可以刪除。老闆行事曆上的班表仍然是只讀。'],
+  ['泰順班表','課表右下角「＋ 排課」→ 選「🎙 泰順臨時時段」，填日期、開始和結束時間。預設會直接寫進老闆的行事曆（標題用「林似儒」，老闆和同事看得到），取消勾選則只存在自己的日曆。點課表上的泰順格子可以刪除，刪的是老闆行事曆上的那個班，要小心。'],
   ['泰順薪資','泰順那張卡片可以填「時數（含通勤、出差）× 時薪（預設 300）」，會自動算出金額，金額也能直接改，按儲存就會算進應領。收到錢再按「記錄收款」。金額超過 20,010 會自動試算預扣的 10% 所得稅和 2.11% 二代健保，卡片的「應領」是扣完之後的實領。'],
   ['應領怎麼算','時薪 × 實際上課時數（林口每月再扣 15 元轉帳手續費；泰順用扣完稅的實領）；學生有特別時薪就用特別價；請假、老師停課不算；代課和體驗課照教室時薪。當月只算已上完的課。'],
   ['藝文滿四堂','每位學生各自滿四堂發一次（第四堂當天收到）。這筆算在四堂裡大部分所在的月份，平手算第四堂的月份。同步日曆前已上的堂數填在學生的「藝文起始進度」。'],
@@ -4561,6 +4569,8 @@ function openAddLesson(){
   sel.innerHTML=`<option value="">選擇學生…</option><option value="__ts">🎙 泰順臨時時段（線上會議等）</option>`+list.map(s=>`<option value="${s.id}">${esc(s.name)}${s.nick?'（'+esc(s.nick)+'）':''}・${s.room.replace(' Yamaha','')}</option>`).join('');
   document.getElementById('book-student-row').style.display='';
   bookingStudentId=null;rescheduleEvId=null;
+  document.getElementById('book-ts-row').style.display='none';
+  document.getElementById('book-end-row').style.display='none';document.getElementById('book-dur-row').style.display='';
   document.getElementById('book-title').textContent='＋ 加課';
   document.getElementById('book-date').value=twToday();
   document.getElementById('book-time').value='19:00';
@@ -4568,9 +4578,19 @@ function openAddLesson(){
   document.getElementById('save-book-btn').textContent='✅ 建立';
   document.getElementById('sheet-booking').classList.add('show');
 }
+function hmToMin(s){const [h,m]=String(s||'0:0').split(':').map(Number);return (h||0)*60+(m||0);}
+function minToHM(n){n=Math.max(0,Math.min(1439,n));return String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');}
+function tsEndSync(){ // 開始時間改了，結束時間若不比開始晚，就自動設成開始後一小時
+  if(bookingStudentId!=='__ts') return;
+  const st=hmToMin(document.getElementById('book-time').value),en=hmToMin(document.getElementById('book-end').value);
+  if(!document.getElementById('book-end').value||en<=st) document.getElementById('book-end').value=minToHM(st+60);
+}
 function pickBookStudent(sid){
   bookingStudentId=sid||null;
-  if(sid==='__ts'){document.getElementById('book-title').textContent='＋ 泰順臨時時段';document.getElementById('book-duration').value='60';return;}
+  document.getElementById('book-ts-row').style.display=sid==='__ts'?'':'none';
+  document.getElementById('book-end-row').style.display=sid==='__ts'?'':'none';
+  document.getElementById('book-dur-row').style.display=sid==='__ts'?'none':'';
+  if(sid==='__ts'){document.getElementById('book-title').textContent='＋ 泰順班表';document.getElementById('book-end').value=minToHM(hmToMin(document.getElementById('book-time').value||'19:00')+60);return;}
   const s=students.find(x=>x.id===sid);if(!s)return;
   document.getElementById('book-title').textContent=`＋ ${s.name}｜${bookWord(s)}`;
   if(s.time) document.getElementById('book-time').value=pad5(s.time);
@@ -5047,7 +5067,7 @@ function renderSchedule(){
     (weekShifts||[]).forEach(sh=>{
       const p=evParts(sh.start);const dur=Math.round((new Date(sh.end)-new Date(sh.start))/60000)||60;
       const st=Math.max(p.min,START_H*60);if(st>=END_H*60) return;
-      evs.push({s:{id:'',name:'泰順',room:SHIFT_PLACE,shift:true,extraId:sh.extra?sh.id:''},dayIdx:(p.dow+6)%7,norm:p.hhmm,dur:Math.min(dur,END_H*60-st),st,en:Math.min(p.min+dur,END_H*60),booking:false,state:''});
+      evs.push({s:{id:'',name:'泰順',room:SHIFT_PLACE,shift:true,extraId:sh.id,bossShift:!!sh.boss},dayIdx:(p.dow+6)%7,norm:p.hhmm,dur:Math.min(dur,END_H*60-st),st,en:Math.min(p.min+dur,END_H*60),booking:false,state:''});
     });
   }else if(weekOffset===0&&!useCal){
     activeStudents.filter(s=>!isBooking(s)).forEach(s=>{
@@ -5116,7 +5136,7 @@ function renderSchedule(){
     const bg=layered
       ?`linear-gradient(90deg, ${rc.color}10 0px, ${rc.color}55 14px), linear-gradient(90deg, rgba(10,15,10,0.15) 0px, var(--card) 10px)`
       :(n>1?`linear-gradient(90deg, ${rc.color}55, ${rc.color}25), var(--card)`:`${rc.color}30`);
-    return`<div ${s.id?`onclick="openDetail('${s.id}','schedule')"`:s.subId?`onclick="openSubRecord('${s.subId}')"`:s.extraId?`onclick="delExtraShift('${s.extraId}')"`:''} title="${s.name} ${norm}${booking?' 約課':''}${state==='leave'?' 請假':state==='teacherOff'?' 老師停課':''}" style="
+    return`<div ${s.id?`onclick="openDetail('${s.id}','schedule')"`:s.subId?`onclick="openSubRecord('${s.subId}')"`:s.extraId?`onclick="delExtraShift('${s.extraId}',${s.bossShift?1:0})"`:''} title="${s.name} ${norm}${booking?' 約課':''}${state==='leave'?' 請假':state==='teacherOff'?' 老師停課':''}" style="
       position:absolute;
       top:${topPx}px;
       left:${left};
