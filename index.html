@@ -39,7 +39,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Microso
 
 /* Content & Nav */
 .content{flex:1;overflow:visible;padding-bottom:calc(64px + var(--safe-bot) + 16px);}
-.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;background:var(--surface);border-top:1px solid var(--border);padding-bottom:var(--safe-bot);display:flex;z-index:200;}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:600px;background:var(--surface);border-top:1px solid var(--border);padding-bottom:var(--safe-bot);display:flex;z-index:200;}
 .nav-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 4px 8px;gap:3px;cursor:pointer;border:none;background:none;font-family:inherit;color:var(--text3);transition:color 0.15s;}
 .nav-tab.active{color:var(--accent);}
 .nav-tab{position:relative;padding:14px 4px 14px !important;}
@@ -1086,8 +1086,10 @@ let gTokenClient=null,gToken=null,gExp=0;
 try{const g=JSON.parse(localStorage.getItem('gcal_token')||'null');if(g){gToken=g.t;gExp=g.e;}}catch(e){}
 function gcalValid(){return !!gToken&&Date.now()<gExp-60000;}
 // ── Google 長期登入（透過 Cloudflare Worker 換 refresh token）──
-const APP_VERSION='2026.11.22-2';
+const APP_VERSION='2026.11.25-1';
 const CHANGELOG=[
+  {v:'2026.11.25-1',items:['修正 iPhone 上滑動頁面時，下方選單列偶爾飄到畫面中間：選單列不再用位移置中，改用固定在畫面底部的方式']},
+  {v:'2026.11.22-3',items:['最新動態的打卡：「有按下班」改成「已下班」（代表已記錄到實際下班時間，手動按或捷徑偵測離開都算）']},
   {v:'2026.11.22-2',items:['排泰順班改成選「開始時間」和「結束時間」，不再只有 30／60／90／120 分鐘']},
   {v:'2026.11.22-1',items:['泰順班表可以直接在 App 排：排課選「泰順臨時時段」，預設寫進老闆的行事曆（標題「林似儒」），也可取消勾選只存在自己的日曆','點課表上的泰順格子可以刪除（老闆行事曆上的班會真的被刪掉，刪之前會確認）']},
   {v:'2026.11.17-2',items:['待寫紀錄改成顯示過去 90 天內所有沒寫紀錄的課（這一週的課連已寫的也會列出來，灰色顯示）；首頁提醒也改成「還有 N 堂未紀錄」']},
@@ -3736,7 +3738,7 @@ async function renderFeed(){
       items=(d&&d.items||[]).filter(e=>e.status!=='cancelled'&&e.start?.dateTime).map(e=>{
         const pr=e.extendedProperties?.private||{};const a=evParts(e.start.dateTime),b=evParts(e.end.dateTime);
         const hrs=((new Date(e.end.dateTime)-new Date(e.start.dateTime))/3600000).toFixed(1);
-        return{at:e.start.dateTime,icon:'📍',title:`${(pr.place||'').replace(' Yamaha','')} ${a.hhmm}–${b.hhmm}`,sub:`${hrs}h・${pr.how||'打卡'}${pr.checkedOut==='1'?'・有按下班':''}`,click:`openCheckinEdit('${e.id}')`};
+        return{at:e.start.dateTime,icon:'📍',title:`${(pr.place||'').replace(' Yamaha','')} ${a.hhmm}–${b.hhmm}`,sub:`${hrs}h・${pr.how||'打卡'}${pr.checkedOut==='1'?'・已下班':''}`,click:`openCheckinEdit('${e.id}')`};
       });
       // 健身也一起列進「地點」
       if(gymRows===null) await loadGym();
